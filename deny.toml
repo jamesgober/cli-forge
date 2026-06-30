@@ -1,4 +1,4 @@
-# cargo-deny configuration for cli-core.
+# cargo-deny configuration for cli-forge.
 # Schema reference: https://embarkstudios.github.io/cargo-deny/checks/cfg.html
 
 [graph]

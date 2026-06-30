@@ -22,7 +22,7 @@ use std::io::Write;
 /// # Examples
 ///
 /// ```
-/// use cli_core::{out, style};
+/// use cli_forge::{out, style};
 ///
 /// out("building...");                 // plain, allocation-free
 /// out(style("done").green().bold());  // styled, rendered on write
@@ -44,7 +44,7 @@ pub fn out<T: Display>(value: T) {
 /// # Examples
 ///
 /// ```
-/// use cli_core::{err, style};
+/// use cli_forge::{err, style};
 ///
 /// err("something went wrong");
 /// err(style("ERROR:").red().bold());

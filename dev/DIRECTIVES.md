@@ -1,4 +1,4 @@
-# cli-core &mdash; Engineering Directives
+# cli-forge &mdash; Engineering Directives
 
 > Engineering standards and the definition of done for this project. Read alongside `REPS.md` (root, authoritative) and `dev/ROADMAP.md` (current phase). If anything here conflicts with `REPS.md`, `REPS.md` wins.
 
@@ -6,13 +6,13 @@
 
 ## 0. Philosophy
 
-This library is built and maintained to a production standard and treated as a flagship piece of work. Plan the full path, then build one verified step at a time. "Good enough" is treated as a defect. cli-core is foundational: it powers internal tooling, AVA, and database CLIs, and it is the base every higher CLI layer (tables, progress, gradients, shells) builds on. Its API is the thing developers touch every day, so the bar is not just "works" but "clean, obvious, and hard to misuse."
+This library is built and maintained to a production standard and treated as a flagship piece of work. Plan the full path, then build one verified step at a time. "Good enough" is treated as a defect. cli-forge is foundational: it powers internal tooling, AVA, and database CLIs, and it is the base every higher CLI layer (tables, progress, gradients, shells) builds on. Its API is the thing developers touch every day, so the bar is not just "works" but "clean, obvious, and hard to misuse."
 
 ---
 
 ## 1. What this is
 
-cli-core is a unified command-line framework: argument parsing and styled output through one API, with commands that register at runtime. It owns four things and nothing else: parsing (a recursive command tree with args/flags), output (one styling layer used three ways), command registration (from anywhere, hideable, auth-gateable), and help (auto-generated, customizable). It deliberately does NOT own tables, progress bars, gradients, layouts, or shells &mdash; those are sibling crates in the cli collection that consume this crate's output API, so the core stays small and they all speak one system.
+cli-forge is a unified command-line framework: argument parsing and styled output through one API, with commands that register at runtime. It owns four things and nothing else: parsing (a recursive command tree with args/flags), output (one styling layer used three ways), command registration (from anywhere, hideable, auth-gateable), and help (auto-generated, customizable). It deliberately does NOT own tables, progress bars, gradients, layouts, or shells &mdash; those are sibling crates in the cli collection that consume this crate's output API, so the core stays small and they all speak one system.
 
 ---
 

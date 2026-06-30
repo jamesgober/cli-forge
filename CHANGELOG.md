@@ -3,7 +3,7 @@
     <br><b>CHANGELOG</b>
 </h1>
 <p>
-  All notable changes to <code>cli-core</code> will be documented in this file. The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
+  All notable changes to <code>cli-forge</code> will be documented in this file. The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
   and this project adheres to <a href="https://semver.org/spec/v2.0.0.html/">Semantic Versioning</a>.
 </p>
 
@@ -21,11 +21,12 @@
 
 ---
 
-## [0.2.0] - 2026-06-30
+## [0.2.5] - 2026-06-30
 
 The output layer — the load-bearing piece every sibling crate depends on. Three
 styling paths over one cross-platform terminal backend, with the plain path proven
-allocation-free by test rather than by claim.
+allocation-free by test rather than by claim. This is the first substantive release
+under the `cli-forge` name, following the 0.2.0 name claim.
 
 ### Added
 
@@ -62,9 +63,23 @@ allocation-free by test rather than by claim.
 ### Fixed
 
 - `clippy.toml` MSRV corrected from `1.87` to the crate's `1.85`.
-- `deny.toml` header comment corrected (`rate-net` &rarr; `cli-core`).
+- `deny.toml` header comment corrected (`rate-net` &rarr; `cli-forge`).
 - `Cargo.lock` is now committed (removed from `.gitignore`) for reproducible
   builds, as REPS requires.
+
+---
+
+## [0.2.0] - 2026-06-30
+
+Name claim. The crate's original name was unavailable on crates.io, so the project
+was renamed to `cli-forge` and this version was published to secure the name. It
+carries the 0.1.0 structure forward under the new name; the output layer ships in
+0.2.5.
+
+### Changed
+
+- Crate renamed to `cli-forge` (crate name, library path `cli_forge`, repository
+  and documentation links).
 
 ---
 
@@ -81,6 +96,7 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-core/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/jamesgober/cli-core/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/jamesgober/cli-core/releases/tag/v0.1.0
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/jamesgober/cli-forge/compare/v0.2.0...v0.2.5
+[0.2.0]: https://github.com/jamesgober/cli-forge/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/jamesgober/cli-forge/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 <h1 align="center">
     <img width="99" alt="Rust logo" src="https://raw.githubusercontent.com/jamesgober/rust-collection/72baabd71f00e14aa9184efcb16fa3deddda3a0a/assets/rust-logo.svg">
-    <br><b>cli-core</b><br>
+    <br><b>cli-forge</b><br>
     <sub><sup>API REFERENCE</sup></sub>
 </h1>
 <div align="center">
@@ -16,10 +16,10 @@
 </div>
 <br>
 
-> Complete reference for every public item in `cli-core`, with examples.
+> Complete reference for every public item in `cli-forge`, with examples.
 >
 > **Status:** the output layer below — `out`/`err`, the three styling paths, and
-> the color model — is implemented and stable as of **v0.2.0**. The
+> the color model — is implemented and stable as of **v0.2.5**. The
 > command/registration surface (`Command`/`App`) is the FROZEN planned design and
 > is marked _(planned, v0.3.0)_; its signatures are the contract sibling crates
 > build against and will not drift. See [`dev/ROADMAP.md`](../dev/ROADMAP.md).
@@ -42,7 +42,7 @@
 
 ## Overview
 
-cli-core unifies argument parsing and styled output under one API, with commands
+cli-forge unifies argument parsing and styled output under one API, with commands
 that register at runtime. The design goal is the lightness of argh with the reach
 of clap, and — unlike either — output styling lives in the *same* system as
 parsing, so extensions (tables, progress, gradients) all speak one layer.
@@ -61,7 +61,7 @@ the same intent, over one cross-platform terminal backend.
 
 ```toml
 [dependencies]
-cli-core = "0.2"
+cli-forge = "0.2"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -69,7 +69,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-core = { version = "0.2", default-features = false, features = ["std"] }
+cli-forge = { version = "0.2", default-features = false, features = ["std"] }
 ```
 
 ---
@@ -77,7 +77,7 @@ cli-core = { version = "0.2", default-features = false, features = ["std"] }
 ## Quick Start
 
 ```rust
-use cli_core::{define_tag, err, out, parse, style, tag};
+use cli_forge::{define_tag, err, out, parse, style, tag};
 
 // Plain output — the common case, one call, no allocation for a literal.
 out("building...");
@@ -122,7 +122,7 @@ pub fn err<T: std::fmt::Display>(value: T);
 Plain lines and formatted values:
 
 ```rust
-use cli_core::out;
+use cli_forge::out;
 
 out("compiling 12 crates");
 out(format!("compiled {} of {} targets", 12, 12));
@@ -134,7 +134,7 @@ out(format!("wrote {path}"));
 Errors and diagnostics on standard error:
 
 ```rust
-use cli_core::{err, style};
+use cli_forge::{err, style};
 
 err("error: missing required argument `--input`");
 err(style("error:").red().bold()); // styled marker, plain text follows
@@ -143,7 +143,7 @@ err(style("error:").red().bold()); // styled marker, plain text follows
 Mixing plain and styled in the same stream:
 
 ```rust
-use cli_core::{out, style};
+use cli_forge::{out, style};
 
 out("Summary");
 out(style("  3 passed").green());
@@ -220,7 +220,7 @@ text.
 Named colors and attributes:
 
 ```rust
-use cli_core::{out, style};
+use cli_forge::{out, style};
 
 out(style("PASS").green().bold());
 out(style("note").cyan());
@@ -230,7 +230,7 @@ out(style("deprecated").yellow().underline());
 24-bit color via hex and rgb:
 
 ```rust
-use cli_core::{out, style};
+use cli_forge::{out, style};
 
 out(style("amber warning").hex("#ff8800"));
 out(style("teal ok").rgb(0, 200, 120));
@@ -241,7 +241,7 @@ Rendering to a string instead of printing — for logging, tables, or further
 composition:
 
 ```rust
-use cli_core::style;
+use cli_forge::style;
 
 let label = style("ERROR").red().bold().render();
 let line = format!("{label}: {}", "build failed");
@@ -251,7 +251,7 @@ assert!(line.contains("ERROR"));
 Invalid hex is ignored rather than panicking:
 
 ```rust
-use cli_core::style;
+use cli_forge::style;
 
 let s = style("x").hex("not-a-color"); // color left unset
 assert_eq!(s.render(), "x");
@@ -293,7 +293,7 @@ surrounding color rather than failing.
 A diagnostic line with a colored, bold marker:
 
 ```rust
-use cli_core::parse;
+use cli_forge::parse;
 
 parse("<c=red><b>ERROR:</b></c> <c=#ff8800>disk almost full</c>");
 ```
@@ -301,7 +301,7 @@ parse("<c=red><b>ERROR:</b></c> <c=#ff8800>disk almost full</c>");
 Nested and mixed styling in one template:
 
 ```rust
-use cli_core::parse;
+use cli_forge::parse;
 
 parse("<b>tests</b>: <c=green>12 passed</c>, <c=red>1 failed</c>, <c=128,128,128>3 skipped</c>");
 ```
@@ -309,7 +309,7 @@ parse("<b>tests</b>: <c=green>12 passed</c>, <c=red>1 failed</c>, <c=128,128,128
 Plain text and stray delimiters pass through unharmed:
 
 ```rust
-use cli_core::parse;
+use cli_forge::parse;
 
 parse("use a < b to compare; <unknown> tags print literally");
 ```
@@ -359,7 +359,7 @@ impl Tag {
 Define a small palette up front, reuse it everywhere:
 
 ```rust
-use cli_core::{define_tag, out, style, tag};
+use cli_forge::{define_tag, out, style, tag};
 
 define_tag("ok", style("").green().bold());
 define_tag("warn", style("").yellow().bold());
@@ -373,10 +373,10 @@ out(tag("fail").render_with("[fail] smoke test"));
 Reuse across modules — a name defined anywhere resolves everywhere:
 
 ```rust
-use cli_core::{define_tag, style};
+use cli_forge::{define_tag, style};
 
 mod theme {
-    use cli_core::{define_tag, style};
+    use cli_forge::{define_tag, style};
     pub fn install() {
         define_tag("heading", style("").bold().underline());
     }
@@ -384,14 +384,14 @@ mod theme {
 
 theme::install();
 // ...elsewhere:
-use cli_core::{out, tag};
+use cli_forge::{out, tag};
 out(tag("heading").render_with("Results"));
 ```
 
 Unknown names render plain instead of failing:
 
 ```rust
-use cli_core::tag;
+use cli_forge::tag;
 
 assert_eq!(tag("never-defined").render_with("text"), "text");
 ```
@@ -433,11 +433,11 @@ commands registered **from anywhere**, not just `main`. Commands can be hidden
 from help or marked auth-gated. The signatures below are frozen.
 
 ```rust,ignore
-use cli_core::{App, Command};
+use cli_forge::{App, Command};
 
 let mut app = App::new("forge")
     .help_header("forge — project constructor")
-    .help_footer("docs: https://github.com/jamesgober/cli-core");
+    .help_footer("docs: https://github.com/jamesgober/cli-forge");
 
 app.register(
     Command::new("init")
@@ -479,7 +479,7 @@ impl App {
 | `color` | yes | ANSI / styled output. Implies `std`. Disable for plain output (still complete). |
 | `auth` | no | Reserved for enforcement of the `requires_auth` command flag (v0.5.0); no effect yet. |
 
-cli-core's core has no heavy mandatory dependencies. The only platform-specific
+cli-forge's core has no heavy mandatory dependencies. The only platform-specific
 piece is enabling the Windows console's ANSI mode, pulled in by `color` on Windows
 targets alone.
 

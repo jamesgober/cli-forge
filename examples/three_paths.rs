@@ -6,7 +6,7 @@
 //! cargo run --example three_paths
 //! ```
 
-use cli_core::{define_tag, out, parse, style, tag};
+use cli_forge::{define_tag, out, parse, style, tag};
 
 fn main() {
     out("Three ways to say the same thing:");

@@ -1,4 +1,4 @@
-# cli-core — Roadmap
+# cli-forge — Roadmap
 
 > Path from scaffold to a stable 1.0. Hard parts are front-loaded; each phase has hard exit criteria.
 >
@@ -15,7 +15,7 @@ Compiles, CI green, structure correct, no domain logic.
 
 ---
 
-## v0.2.0 — Output tower + terminal backend (DONE)
+## v0.2.0 — Output tower + terminal backend (DONE, shipped in 0.2.5)
 
 The output layer is the load-bearing piece every sibling crate depends on, so it
 is built and proven first. Deliver the three styling paths over ONE system:

@@ -2,7 +2,7 @@
 //!
 //! The headline number the roadmap asks for is that the plain path does no
 //! styling work: `bench_plain_write` reproduces exactly what
-//! [`cli_core::out`](cli_core::out) does with a `&str` — `writeln!` to an
+//! [`cli_forge::out`](cli_forge::out) does with a `&str` — `writeln!` to an
 //! already-allocated writer — and it is dramatically cheaper than rendering a
 //! styled value. The styling benchmarks force a true-color level so they measure
 //! real escape-sequence generation rather than the plain-output fast path the
@@ -11,7 +11,7 @@
 use std::hint::black_box;
 use std::io::Write;
 
-use cli_core::{define_tag, style, tag};
+use cli_forge::{define_tag, style, tag};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 /// Force the terminal backend to resolve a true-color level so the styling

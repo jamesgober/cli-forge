@@ -32,7 +32,7 @@ fn store() -> &'static RwLock<HashMap<String, StyleAttrs>> {
 /// # Examples
 ///
 /// ```
-/// use cli_core::{define_tag, out, style, tag};
+/// use cli_forge::{define_tag, out, style, tag};
 ///
 /// define_tag("error", style("").red().bold());
 /// define_tag("hint", style("").cyan());
@@ -58,7 +58,7 @@ pub fn define_tag<S: Into<String>>(name: S, style: Style) {
 /// # Examples
 ///
 /// ```
-/// use cli_core::{define_tag, style, tag};
+/// use cli_forge::{define_tag, style, tag};
 ///
 /// define_tag("ok", style("").green());
 /// assert!(tag("ok").render_with("passed").contains("passed"));
@@ -90,7 +90,7 @@ impl Tag {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::{define_tag, style, tag};
+    /// use cli_forge::{define_tag, style, tag};
     ///
     /// define_tag("warn", style("").yellow().bold());
     /// let line = tag("warn").render_with("disk almost full");

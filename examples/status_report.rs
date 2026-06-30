@@ -6,7 +6,7 @@
 //! cargo run --example status_report
 //! ```
 
-use cli_core::{define_tag, out, parse, style, tag};
+use cli_forge::{define_tag, out, parse, style, tag};
 
 fn main() {
     // Define the program's vocabulary of styles once.

@@ -84,7 +84,7 @@ pub(crate) fn write_styled<W: Write>(
 /// # Examples
 ///
 /// ```
-/// use cli_core::{out, style};
+/// use cli_forge::{out, style};
 ///
 /// out(style("done").green().bold());
 /// out(style("note").hex("#88aaff"));
@@ -105,7 +105,7 @@ pub struct Style {
 /// # Examples
 ///
 /// ```
-/// use cli_core::style;
+/// use cli_forge::style;
 ///
 /// let warning = style("low disk space").yellow().bold();
 /// // `Style` is `Display`, so it renders when printed or formatted.
@@ -159,7 +159,7 @@ impl Style {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::style;
+    /// use cli_forge::style;
     ///
     /// let link = style("https://example.com").hex("#3b82f6").underline();
     /// assert!(link.render().contains("https://example.com"));
@@ -184,7 +184,7 @@ impl Style {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::style;
+    /// use cli_forge::style;
     ///
     /// let teal = style("ok").rgb(0, 200, 120);
     /// assert!(teal.render().contains("ok"));
@@ -200,7 +200,7 @@ impl Style {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::style;
+    /// use cli_forge::style;
     ///
     /// let heading = style("Summary").bold();
     /// assert!(heading.render().contains("Summary"));
@@ -216,7 +216,7 @@ impl Style {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::style;
+    /// use cli_forge::style;
     ///
     /// let link = style("docs").underline();
     /// assert!(link.render().contains("docs"));
@@ -236,7 +236,7 @@ impl Style {
     /// # Examples
     ///
     /// ```
-    /// use cli_core::style;
+    /// use cli_forge::style;
     ///
     /// let s = style("ready").green().render();
     /// assert!(s.contains("ready"));

@@ -8,7 +8,7 @@
 //! NO_COLOR=1 cargo run --example colors
 //! ```
 
-use cli_core::{out, style};
+use cli_forge::{out, style};
 
 fn main() {
     out(style("Standard named colors").bold());

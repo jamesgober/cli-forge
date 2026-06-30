@@ -4,7 +4,7 @@
 //! cargo run --example quick_start
 //! ```
 
-use cli_core::{err, out, style};
+use cli_forge::{err, out, style};
 
 fn main() {
     // The common case is one call with no ceremony.

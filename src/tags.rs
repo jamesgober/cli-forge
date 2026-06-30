@@ -50,7 +50,7 @@ enum Action {
 /// # Examples
 ///
 /// ```
-/// use cli_core::parse;
+/// use cli_forge::parse;
 ///
 /// parse("<c=red><b>ERROR:</b></c> <c=#ff8800>disk almost full</c>");
 /// parse("plain text with a stray < prints fine");

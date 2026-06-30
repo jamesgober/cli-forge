@@ -1,9 +1,9 @@
 # =============================================================================
-#  R E P S   ·   cli-core
+#  R E P S   ·   cli-forge
 # =============================================================================
 [package]
-name    = "cli-core"
-version = "0.2.0"
+name    = "cli-forge"
+version = "0.2.5"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.85"
@@ -25,9 +25,9 @@ keywords = ["cli", "command-line", "terminal", "framework"]
 categories = ["command-line-interface", "development-tools"]
 
 # Links
-homepage      = "https://github.com/jamesgober/cli-core"
-repository    = "https://github.com/jamesgober/cli-core"
-documentation = "https://docs.rs/cli-core"
+homepage      = "https://github.com/jamesgober/cli-forge"
+repository    = "https://github.com/jamesgober/cli-forge"
+documentation = "https://docs.rs/cli-forge"
 
 # Authors
 authors = ["James Gober <me@jamesgober.com>"]
@@ -37,7 +37,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
-name = "cli_core"
+name = "cli_forge"
 path = "src/lib.rs"
 
 

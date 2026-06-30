@@ -1,6 +1,6 @@
 //! The terminal backend.
 //!
-//! Every styled byte cli-core emits goes through one decision made here: how
+//! Every styled byte cli-forge emits goes through one decision made here: how
 //! much color the current terminal can render. The rest of the crate never asks
 //! "are we on Windows?" or "is this a pipe?" — it asks [`color_level`] once and
 //! renders accordingly. Isolating the platform and capability logic in this one

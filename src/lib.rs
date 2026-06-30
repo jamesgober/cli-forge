@@ -1,4 +1,4 @@
-//! # cli-core
+//! # cli-forge
 //!
 //! A unified command-line framework where argument parsing and styled output
 //! speak one API. This release delivers the output layer every other piece — and
@@ -11,7 +11,7 @@
 //! parsing and no allocation for a string literal:
 //!
 //! ```
-//! use cli_core::{out, err};
+//! use cli_forge::{out, err};
 //!
 //! out("building...");
 //! err("something went wrong");
@@ -21,7 +21,7 @@
 //! bytes for the same intent:
 //!
 //! ```
-//! use cli_core::{define_tag, out, parse, style, tag};
+//! use cli_forge::{define_tag, out, parse, style, tag};
 //!
 //! // 1. The builder — chain methods, drop the result into `out`.
 //! out(style("done").green().bold());
