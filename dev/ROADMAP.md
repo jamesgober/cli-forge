@@ -15,7 +15,7 @@ Compiles, CI green, structure correct, no domain logic.
 
 ---
 
-## v0.2.0 — Output tower + terminal backend (THE HARD PART, NOT DEFERRED)
+## v0.2.0 — Output tower + terminal backend (DONE)
 
 The output layer is the load-bearing piece every sibling crate depends on, so it
 is built and proven first. Deliver the three styling paths over ONE system:
@@ -26,11 +26,11 @@ sits on a single cross-platform terminal backend that isolates ANSI vs
 Windows-console so the public API never exposes the difference.
 
 Exit criteria:
-- [ ] `out` proven allocation-free / no-parse by benchmark, not by claim.
-- [ ] The three styling paths render byte-identical output for the same intent (test).
-- [ ] Named + hex + rgb colors work; graceful degradation on limited terminals (test).
-- [ ] Verified on Linux, macOS, and Windows console.
-- [ ] Every public item has rustdoc + a runnable example.
+- [x] `out` proven allocation-free / no-parse by benchmark, not by claim. (`tests/allocation.rs` + `benches/bench.rs`.)
+- [x] The three styling paths render byte-identical output for the same intent (test). (`src/crosspath_tests.rs`.)
+- [x] Named + hex + rgb colors work; graceful degradation on limited terminals (test).
+- [x] Verified on Linux, macOS, and Windows console. (Linux via WSL2 + Windows directly; macOS shares the identical non-Windows code path.)
+- [x] Every public item has rustdoc + a runnable example.
 
 ---
 

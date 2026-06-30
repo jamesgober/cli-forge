@@ -17,6 +17,10 @@ jobs:
   test:
     name: Test (${{ matrix.os }} / ${{ matrix.rust }})
     runs-on: ${{ matrix.os }}
+    # rust-toolchain.toml pins `stable` for local dev; this overrides it per-job
+    # so the matrix actually exercises both stable and the 1.85 MSRV.
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     strategy:
       fail-fast: false
       matrix:

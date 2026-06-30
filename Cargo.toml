@@ -3,7 +3,7 @@
 # =============================================================================
 [package]
 name    = "cli-core"
-version = "0.1.0"
+version = "0.2.0"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.85"
@@ -44,16 +44,28 @@ path = "src/lib.rs"
 # FEATURE FLAGS
 # #################################
 [features]
-default = ["std"]
+default = ["std", "color"]
+# Standard library: terminal detection and the stdout/stderr write paths.
 std = []
-# Serialization support.
-serde = ["dep:serde"]
+# ANSI / styled output. Disable for plain output (the API stays complete; every
+# styled value renders as its plain text). Implies `std`: rendering needs it.
+color = ["std", "dep:enable-ansi-support"]
+# Reserved for enforcement of the `requires_auth` command flag (auth seam,
+# v0.5.0). No effect yet; declared so the documented surface matches the crate.
+auth = []
 
 
 # DEPENDENCIES
 # #################################
 [dependencies]
-serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
+
+# Windows-only. Enables the console's virtual-terminal (ANSI) processing so the
+# same escape-sequence backend drives Linux, macOS, and the Windows console.
+# Delegated to a crate because the crate root is `#![forbid(unsafe_code)]` and
+# the enable call (SetConsoleMode) requires FFI. Pulled in only by the `color`
+# feature on Windows targets.
+[target.'cfg(windows)'.dependencies]
+enable-ansi-support = { version = "0.2", optional = true }
 
 
 # DEV DEPENDENCIES
@@ -69,8 +81,30 @@ loom = "0.7"
 # BENCHMARKS
 # #################################
 [[bench]]
-name    = "bench"
-harness = false
+name             = "bench"
+harness          = false
+required-features = ["std"]
+
+
+# EXAMPLES
+# #################################
+# Examples exercise the public output API, which is gated on `std`; declaring the
+# requirement skips them cleanly under `--no-default-features`.
+[[example]]
+name             = "quick_start"
+required-features = ["std"]
+
+[[example]]
+name             = "three_paths"
+required-features = ["std"]
+
+[[example]]
+name             = "colors"
+required-features = ["std"]
+
+[[example]]
+name             = "status_report"
+required-features = ["std"]
 
 
 # RELEASE PROFILE
