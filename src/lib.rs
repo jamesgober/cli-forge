@@ -44,6 +44,29 @@
 //! feature off, styling is dropped and only text is written. The Windows console
 //! is handled behind the same API as Unix terminals.
 //!
+//! ## Commands
+//!
+//! Build a recursive [`Command`] tree, register commands into an [`App`] from
+//! anywhere, and let [`App::parse`] resolve the invocation, parse arguments, and
+//! run the selected command's handler:
+//!
+//! ```no_run
+//! use cli_forge::{App, Arg, Command, out};
+//!
+//! let mut app = App::new("forge");
+//! app.register(
+//!     Command::new("build")
+//!         .about("compile the project")
+//!         .arg(Arg::flag("release").short('r'))
+//!         .arg(Arg::option("jobs").short('j').default("1"))
+//!         .run(|m| out(format!("release={} jobs={}", m.flag("release"), m.value("jobs").unwrap_or("?")))),
+//! );
+//! let _ = app.parse();
+//! ```
+//!
+//! Malformed input never panics: [`App::parse`] prints a structured
+//! [`ParseError`] and exits, while [`App::try_parse_from`] returns it.
+//!
 //! ## Feature flags
 //!
 //! - **`std`** *(default)* — terminal detection and the stdout/stderr writers.
@@ -68,9 +91,21 @@
 #![deny(clippy::dbg_macro)]
 
 #[cfg(feature = "std")]
+mod app;
+#[cfg(feature = "std")]
+mod arg;
+#[cfg(feature = "std")]
 mod color;
 #[cfg(feature = "std")]
+mod command;
+#[cfg(feature = "std")]
+mod error;
+#[cfg(feature = "std")]
+mod matches;
+#[cfg(feature = "std")]
 mod output;
+#[cfg(feature = "std")]
+mod parser;
 #[cfg(feature = "std")]
 mod registry;
 #[cfg(feature = "std")]
@@ -83,6 +118,16 @@ mod terminal;
 #[cfg(all(test, feature = "color"))]
 mod crosspath_tests;
 
+#[cfg(feature = "std")]
+pub use crate::app::App;
+#[cfg(feature = "std")]
+pub use crate::arg::Arg;
+#[cfg(feature = "std")]
+pub use crate::command::Command;
+#[cfg(feature = "std")]
+pub use crate::error::ParseError;
+#[cfg(feature = "std")]
+pub use crate::matches::Matches;
 #[cfg(feature = "std")]
 pub use crate::output::{err, out};
 #[cfg(feature = "std")]

@@ -18,11 +18,11 @@
 
 > Complete reference for every public item in `cli-forge`, with examples.
 >
-> **Status:** the output layer below — `out`/`err`, the three styling paths, and
-> the color model — is implemented and stable as of **v0.2.5**. The
-> command/registration surface (`Command`/`App`) is the FROZEN planned design and
-> is marked _(planned, v0.3.0)_; its signatures are the contract sibling crates
-> build against and will not drift. See [`dev/ROADMAP.md`](../dev/ROADMAP.md).
+> **Status:** the output layer (`out`/`err`, the three styling paths, the color
+> model) and the command layer (`App`, `Command`, `Arg`, `Matches`, `ParseError`)
+> are implemented and stable as of **v0.3.0**. The help engine (v0.4.0) and auth
+> seam (v0.5.0) follow; the public surface freezes at 1.0. See
+> [`dev/ROADMAP.md`](../dev/ROADMAP.md).
 
 ## Table of Contents
 
@@ -34,7 +34,10 @@
 - [Styling path 2 — tags: `parse`](#tags)
 - [Styling path 3 — named registry: `define_tag` / `tag`](#registry)
 - [Colors and terminal behavior](#colors)
-- [Commands: `Command` / `App`](#commands)
+- [Commands: `App` / `Command`](#commands)
+- [Arguments: `Arg`](#arguments)
+- [Parsed results: `Matches`](#matches-section)
+- [Errors: `ParseError`](#errors)
 - [Feature flags](#feature-flags)
 - [Performance notes](#performance)
 
@@ -51,9 +54,11 @@ It owns parsing, output, command registration, and help. It does NOT own tables,
 progress bars, gradients, layouts, or shells — those are sibling crates in the
 cli collection that build on this crate's output API.
 
-This release delivers the output layer: a near-direct plain path (`out`/`err`)
-and three ways to add color and attributes that all render to identical bytes for
-the same intent, over one cross-platform terminal backend.
+As of v0.3.0 the output layer and the command layer are both in place: a
+near-direct plain path (`out`/`err`) and three ways to add color that all render
+to identical bytes, over one cross-platform terminal backend; and a recursive
+command tree with runtime registration, arg/flag parsing, and structured,
+non-panicking errors.
 
 ---
 
@@ -61,7 +66,7 @@ the same intent, over one cross-platform terminal backend.
 
 ```toml
 [dependencies]
-cli-forge = "0.2"
+cli-forge = "0.3"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -69,7 +74,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.2", default-features = false, features = ["std"] }
+cli-forge = { version = "0.3", default-features = false, features = ["std"] }
 ```
 
 ---
@@ -426,14 +431,14 @@ than printing visible escape sequences.
 
 ---
 
-<h2 id="commands">Commands: <code>Command</code> / <code>App</code></h2>
+<h2 id="commands">Commands: <code>App</code> / <code>Command</code></h2>
 
-_(planned, v0.3.0)_ A recursive command tree; an `App` registry that accepts
-commands registered **from anywhere**, not just `main`. Commands can be hidden
-from help or marked auth-gated. The signatures below are frozen.
+A recursive command tree, registered into an [`App`] **from anywhere** — not just
+`main`. [`App::parse`](#app-parse) resolves the invocation, parses its arguments,
+and runs the selected command's handler.
 
-```rust,ignore
-use cli_forge::{App, Command};
+```rust
+use cli_forge::{App, Arg, Command, out};
 
 let mut app = App::new("forge")
     .help_header("forge — project constructor")
@@ -441,31 +446,185 @@ let mut app = App::new("forge")
 
 app.register(
     Command::new("init")
-        .about("bootstrap a planned lib")
-        .run(|m| { /* ... */ })
+        .about("bootstrap a new project")
+        .arg(Arg::positional("name").required(true))
+        .run(|m| out(format!("init {}", m.value("name").unwrap_or("?")))),
 );
-app.register(Command::new("secret").hidden(true).run(|_| {}));
-app.register(Command::new("publish").requires_auth(true).run(|_| {}));
+app.register(Command::new("secret").hidden(true));
+app.register(Command::new("publish").requires_auth(true));
 
-let matches = app.parse();
+// `try_parse_from` is the non-exiting form used here for illustration.
+let matches = app.try_parse_from(["init", "demo"]).unwrap();
+assert_eq!(matches.subcommand().unwrap().0, "init");
 ```
 
-```rust,ignore
-impl Command {
-    pub fn new(name: &str) -> Command;
-    pub fn about(self, text: &str) -> Command;
-    pub fn arg(self, arg: Arg) -> Command;
-    pub fn subcommand(self, cmd: Command) -> Command;
-    pub fn hidden(self, yes: bool) -> Command;
-    pub fn requires_auth(self, yes: bool) -> Command;
-    pub fn run(self, handler: impl Fn(&Matches)) -> Command;
+### `Command`
+
+A node in the tree. Build with `Command::new`, refine by chaining, attach a
+handler with `run`.
+
+| Method | Description |
+|--------|-------------|
+| `Command::new(name)` | Create a command with the given invocation name. |
+| `.about(text)` | One-line description (shown in help, v0.4.0). |
+| `.arg(arg)` | Accept an [`Arg`](#arguments). Positionals fill in declaration order. |
+| `.subcommand(cmd)` | Nest a child command; composes to any depth. |
+| `.hidden(yes)` | Hide from generated help while staying invokable. |
+| `.requires_auth(yes)` | Mark as auth-gated. Stored now; enforced with the auth seam (v0.5.0). |
+| `.run(handler)` | `Fn(&Matches) + 'static` run when this command is selected. |
+
+`name`, `text` accept anything `Into<String>`.
+
+### `App`
+
+The registry and entry point.
+
+| Method | Description |
+|--------|-------------|
+| `App::new(name)` | Create an application with the program name. |
+| `.help_header(text)` / `.help_footer(text)` | Header/footer for generated help (v0.4.0). |
+| `.register(&mut self, cmd)` | Add a top-level command. Callable from any module, any time before parsing. |
+| `.parse() -> Matches` | <a id="app-parse"></a>Parse `std::env::args()`, run the handler, return matches. On malformed input prints a structured error and **exits with status 2** — never panics. |
+| `.try_parse_from(args) -> Result<Matches, ParseError>` | Non-exiting twin: takes an explicit arg list (excluding the program name), runs the handler, returns the matches or a structured error. Ideal for embedding and tests. |
+
+**Registration from anywhere.** `register` takes `&mut App`, so a command built
+in any module — a plugin, a feature module, a config loop — is reachable and
+behaves identically to one built in `main`:
+
+```rust
+use cli_forge::{App, Command};
+
+mod plugin {
+    use cli_forge::{App, Command};
+    pub fn install(app: &mut App) {
+        app.register(Command::new("sync").about("synchronize state"));
+    }
 }
-impl App {
-    pub fn new(name: &str) -> App;
-    pub fn register(&mut self, cmd: Command);
-    pub fn help_header(self, text: &str) -> App;
-    pub fn help_footer(self, text: &str) -> App;
-    pub fn parse(&self) -> Matches;
+
+let mut app = App::new("demo");
+plugin::install(&mut app); // registered outside `main`
+let matches = app.try_parse_from(["sync"]).unwrap();
+assert_eq!(matches.subcommand().unwrap().0, "sync");
+```
+
+**Nested subcommands** dispatch to the deepest selected command:
+
+```rust
+use cli_forge::{App, Arg, Command, out};
+
+let mut app = App::new("demo");
+app.register(
+    Command::new("remote").subcommand(
+        Command::new("add")
+            .arg(Arg::positional("url").required(true))
+            .run(|m| out(format!("added {}", m.value("url").unwrap_or("?")))),
+    ),
+);
+let _ = app.try_parse_from(["remote", "add", "https://example.com"]).unwrap();
+```
+
+---
+
+<h2 id="arguments">Arguments: <code>Arg</code></h2>
+
+An argument a command accepts. Three kinds, each with a constructor; the builder
+methods refine and chain.
+
+| Constructor | Form | Example input |
+|-------------|------|---------------|
+| `Arg::flag(name)` | boolean switch | `--verbose`, `-v` |
+| `Arg::option(name)` | named value | `--output f`, `--output=f`, `-o f`, `-of` |
+| `Arg::positional(name)` | value by position | `path/to/file` |
+
+| Method | Description |
+|--------|-------------|
+| `.short(c)` | One-letter form `-c` (flag/option). |
+| `.long(s)` | Override the `--long` form (defaults to the name). |
+| `.help(s)` | Help text (surfaced by the help engine, v0.4.0). |
+| `.required(b)` | Fail with `MissingRequired` if absent and no default. |
+| `.default(s)` | Value used when an option/positional is omitted. |
+
+The `name` is the key used to read the value back out of a [`Matches`](#matches-section).
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("demo");
+app.register(
+    Command::new("build")
+        .arg(Arg::flag("release").short('r'))
+        .arg(Arg::option("jobs").short('j').default("1"))
+        .arg(Arg::positional("target").default("all")),
+);
+
+let m = app.try_parse_from(["build", "-r", "-j", "8", "lib"]).unwrap();
+let (_, build) = m.subcommand().unwrap();
+assert!(build.flag("release"));
+assert_eq!(build.value("jobs"), Some("8"));
+assert_eq!(build.value("target"), Some("lib"));
+```
+
+**Parsing forms handled:** `--long`, `--long value`, `--long=value`, `-s`,
+`-s value`, `-svalue`, bundled short flags `-abc`, positionals, and the `--`
+end-of-options marker (everything after it is positional). A token like `-5` is
+read as a short flag; put it after `--` to pass a negative-number positional.
+
+---
+
+<h2 id="matches-section">Parsed results: <code>Matches</code></h2>
+
+What the parser produces for one command level, and what a `run` handler receives.
+
+| Method | Description |
+|--------|-------------|
+| `.flag(name) -> bool` | Whether the flag was set (`false` for unknown names). |
+| `.value(name) -> Option<&str>` | An option/positional value, or its default; `None` if absent and undefaulted. |
+| `.subcommand() -> Option<(&str, &Matches)>` | The invoked subcommand's name and its own matches. |
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("git-like");
+app.register(
+    Command::new("commit")
+        .arg(Arg::flag("amend"))
+        .arg(Arg::option("message").short('m')),
+);
+
+let top = app.try_parse_from(["commit", "--amend", "-m", "fix"]).unwrap();
+let (name, commit) = top.subcommand().unwrap();
+assert_eq!(name, "commit");
+assert!(commit.flag("amend"));
+assert_eq!(commit.value("message"), Some("fix"));
+```
+
+---
+
+<h2 id="errors">Errors: <code>ParseError</code></h2>
+
+Every malformed input maps to a `ParseError` variant — never a panic. Returned by
+[`try_parse_from`](#app-parse); [`parse`](#app-parse) renders it through the output
+layer and exits. The enum is `#[non_exhaustive]`.
+
+| Variant | Cause |
+|---------|-------|
+| `UnknownFlag { flag }` | A `-x` / `--name` no argument declares. |
+| `MissingValue { option }` | An option given without its value. |
+| `MissingRequired { arg }` | A required argument omitted (and no default). |
+| `UnknownCommand { name }` | A token where a registered subcommand was expected. |
+| `UnexpectedArgument { value }` | A surplus value with nowhere to go. |
+
+`ParseError` implements `Display` and `std::error::Error`.
+
+```rust
+use cli_forge::{App, Arg, Command, ParseError};
+
+let mut app = App::new("demo");
+app.register(Command::new("build").arg(Arg::option("jobs").short('j')));
+
+match app.try_parse_from(["build", "-j"]) {
+    Err(ParseError::MissingValue { option }) => assert_eq!(option, "jobs"),
+    other => panic!("expected MissingValue, got {other:?}"),
 }
 ```
 

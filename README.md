@@ -35,8 +35,8 @@
 
 ## What's here
 
-As of `v0.2.5`, the **output layer** is implemented and stable — the load-bearing
-piece every sibling crate in the cli collection depends on:
+As of `v0.3.0`, the **output layer** and the **command layer** are implemented and
+stable:
 
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
   string literal. The hot path stays cheap.
@@ -46,9 +46,12 @@ piece every sibling crate in the cli collection depends on:
 - **Full color** — the eight standard names plus any 24-bit color via hex or RGB,
   with graceful downgrade to 256- or 16-color terminals and clean fall-back to
   plain text on pipes, `NO_COLOR`, or the Windows console without ANSI.
+- **Command tree** — a recursive `Command` tree with arg/flag parsing, registered
+  into an `App` **from anywhere** (not just `main`), with `.hidden()` and
+  `.requires_auth()` flags and structured, non-panicking errors.
 
-The command tree, runtime registration, help engine, and auth seam land across the
-rest of the 0.x series — see the [`ROADMAP`](./dev/ROADMAP.md).
+The help engine (`v0.4.0`) and auth seam (`v0.5.0`) land across the rest of the
+0.x series — see the [`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>
@@ -57,7 +60,7 @@ rest of the 0.x series — see the [`ROADMAP`](./dev/ROADMAP.md).
 
 ```toml
 [dependencies]
-cli-forge = "0.2"
+cli-forge = "0.3"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -65,7 +68,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.2", default-features = false, features = ["std"] }
+cli-forge = { version = "0.3", default-features = false, features = ["std"] }
 ```
 
 <br>
@@ -136,11 +139,55 @@ fall-back if it cannot be.
 
 <br>
 
+## Commands
+
+Build a recursive command tree, register commands into an `App` from anywhere, and
+let `parse` resolve the invocation, parse arguments, and run the selected
+command's handler:
+
+```rust
+use cli_forge::{App, Arg, Command, out};
+
+let mut app = App::new("forge");
+
+app.register(
+    Command::new("build")
+        .about("compile the project")
+        .arg(Arg::flag("release").short('r'))
+        .arg(Arg::option("jobs").short('j').default("1"))
+        .run(|m| out(format!(
+            "release={} jobs={}",
+            m.flag("release"),
+            m.value("jobs").unwrap_or("?"),
+        ))),
+);
+
+app.register(
+    Command::new("remote").subcommand(
+        Command::new("add")
+            .arg(Arg::positional("url").required(true))
+            .run(|m| out(format!("added {}", m.value("url").unwrap_or("?")))),
+    ),
+);
+
+let _ = app.parse();
+```
+
+Commands register **from anywhere** — a command built in a non-`main` module is
+reachable and behaves identically, the limitation that made the predecessor
+unusable. The parser handles the standard forms (`--long`, `--long=value`,
+`-s`, `-svalue`, bundled `-abc`, positionals, `--`), and malformed input becomes
+a structured `ParseError`: `parse` prints it and exits `2`, never panicking;
+`try_parse_from` returns it instead. `.hidden()` keeps a command invokable but out
+of help; `.requires_auth()` records the flag for the auth seam (`v0.5.0`).
+
+<br>
+
 ## Feature flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `std` | yes | Standard library: terminal detection and the stdout/stderr writers. |
+| `std` | yes | Standard library: terminal detection, the stdout/stderr writers, and the command layer. |
 | `color` | yes | ANSI / styled output. Implies `std`. Disable for plain output (still complete). |
 | `auth` | no | Reserved for the `requires_auth` command flag (v0.5.0); no effect yet. |
 
@@ -155,6 +202,7 @@ cargo run --example quick_start     # plain output and one styled line
 cargo run --example three_paths     # the same line, three ways
 cargo run --example colors          # named, hex, and rgb color
 cargo run --example status_report   # a realistic deploy-style status report
+cargo run --example commands -- build --release -j 8   # the command tree
 ```
 
 Force color when output is captured, or disable it, to see both paths:
@@ -188,10 +236,9 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v0.2.5` ships the output layer per the [`ROADMAP`](./dev/ROADMAP.md) and
-[`docs/API.md`](./docs/API.md). The command tree and runtime registration
-(`v0.3.0`), the help engine (`v0.4.0`), and the auth seam (`v0.5.0`) follow; the
-public API freezes at `1.0.0`.
+`v0.3.0` ships the command layer on top of `v0.2.5`'s output layer, per the
+[`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md). The help engine
+(`v0.4.0`) and the auth seam (`v0.5.0`) follow; the public API freezes at `1.0.0`.
 
 <hr>
 <br>

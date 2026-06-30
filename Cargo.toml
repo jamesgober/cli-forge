@@ -3,7 +3,7 @@
 # =============================================================================
 [package]
 name    = "cli-forge"
-version = "0.2.5"
+version = "0.3.0"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.85"
@@ -104,6 +104,10 @@ required-features = ["std"]
 
 [[example]]
 name             = "status_report"
+required-features = ["std"]
+
+[[example]]
+name             = "commands"
 required-features = ["std"]
 
 

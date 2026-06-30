@@ -34,16 +34,16 @@ Exit criteria:
 
 ---
 
-## v0.3.0 — Command tree + runtime registration
+## v0.3.0 — Command tree + runtime registration (DONE)
 
 The recursive `Command` tree with args/flags, and an `App` registry that accepts
 commands registered FROM ANYWHERE (not main-only) — the limitation that killed
 the predecessor. Commands support `.hidden()` and the `.requires_auth()` flag.
 
 Exit criteria:
-- [ ] A command registered from a non-`main` module is reachable and behaves identically (test).
-- [ ] Hidden commands are absent from help but still invokable (test).
-- [ ] Arg/flag parsing handles the standard cases; malformed input returns structured errors, never panics.
+- [x] A command registered from a non-`main` module is reachable and behaves identically (test). (`tests/registration.rs`.)
+- [x] Hidden commands are absent from help but still invokable (test). (Excluded from the visible-command listing; still dispatch.)
+- [x] Arg/flag parsing handles the standard cases; malformed input returns structured errors, never panics. (`ParseError`; parser proptest-fuzzed.)
 
 ---
 

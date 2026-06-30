@@ -21,6 +21,42 @@
 
 ---
 
+## [0.3.0] - 2026-06-30
+
+The command layer: a recursive command tree, runtime registration from anywhere,
+and arg/flag parsing with structured, non-panicking errors.
+
+### Added
+
+- `App`: the command registry and entry point — `new`, `register` (callable from
+  any module), `help_header` / `help_footer` (stored for the v0.4.0 help engine),
+  `parse` (env args; prints a structured error and exits `2` on malformed input),
+  and `try_parse_from` (non-exiting, testable/embeddable).
+- `Command`: the recursive tree node — `new`, `about`, `arg`, `subcommand`,
+  `hidden`, `requires_auth` (flag stored; enforced with the auth seam in v0.5.0),
+  and `run` for the handler.
+- `Arg`: `flag` / `option` / `positional` constructors with `short`, `long`,
+  `help`, `required`, and `default`.
+- `Matches`: `flag`, `value`, and `subcommand` accessors, passed to handlers.
+- `ParseError`: a `#[non_exhaustive]` structured error
+  (`UnknownFlag`, `MissingValue`, `MissingRequired`, `UnknownCommand`,
+  `UnexpectedArgument`) implementing `Display` and `std::error::Error`.
+- Parser handling the standard forms: `--long`, `--long=value`, `--long value`,
+  `-s`, `-s value`, `-svalue`, bundled short flags `-abc`, positionals, and the
+  `--` end-of-options marker. Selected command's handler dispatched on parse.
+- `tests/registration.rs`: a command registered from a non-`main` module is
+  reachable and behaves identically (the predecessor's limitation, now tested).
+- `examples/commands.rs`: a subcommand CLI with flags, options, positionals, and
+  the structured-error exit path.
+- `proptest` fuzzing of the parser (arbitrary argument vectors never panic).
+
+### Changed
+
+- `docs/API.md` now documents the implemented command surface (`App`, `Command`,
+  `Arg`, `Matches`, `ParseError`) with parameter tables and examples.
+
+---
+
 ## [0.2.5] - 2026-06-30
 
 The output layer — the load-bearing piece every sibling crate depends on. Three
@@ -96,7 +132,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/jamesgober/cli-forge/compare/v0.2.0...v0.2.5
 [0.2.0]: https://github.com/jamesgober/cli-forge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/cli-forge/releases/tag/v0.1.0
