@@ -167,10 +167,10 @@ impl Command {
     /// Mark the command as requiring authentication.
     ///
     /// With the `auth` feature enabled, the command runs — and appears in help —
-    /// only when the app's [`auth`](crate::App::auth) hook authorizes it;
-    /// otherwise invoking it yields
-    /// [`ParseError::Unauthorized`](crate::ParseError::Unauthorized). Without the
-    /// `auth` feature the flag is inert (the command runs and shows normally).
+    /// only when the app's `App::auth` hook authorizes it; otherwise invoking it
+    /// yields [`ParseError::Unauthorized`](crate::ParseError::Unauthorized).
+    /// Without the `auth` feature the flag is inert (the command runs and shows
+    /// normally).
     ///
     /// # Examples
     ///
