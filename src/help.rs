@@ -20,7 +20,7 @@ pub(crate) fn render_app(cli: &Cli) -> String {
     let mut out = String::new();
     push_header(&mut out, cli);
 
-    let commands = visible(cli.commands);
+    let commands = visible(cli.commands, cli, &[]);
     let width = app_column_width(&commands, cli.version.is_some());
 
     out.push_str(&heading("USAGE:"));
@@ -64,7 +64,7 @@ pub(crate) fn render_command(cli: &Cli, path: &[&str], command: &Command) -> Str
         .iter()
         .filter(|a| a.kind != ArgKind::Positional)
         .collect();
-    let subcommands = visible(&command.subcommands);
+    let subcommands = visible(&command.subcommands, cli, path);
     let width = command_column_width(&positionals, &options, &subcommands);
 
     // USAGE line.
@@ -111,12 +111,38 @@ pub(crate) fn render_command(cli: &Cli, path: &[&str], command: &Command) -> Str
     out
 }
 
-/// The commands to show: neither hidden nor (until the auth seam) auth-gated.
-fn visible(commands: &[Command]) -> Vec<&Command> {
+/// The commands to show in a listing: never hidden ones, and — with the `auth`
+/// feature — auth-gated ones only when the hook authorizes them. `parent_path` is
+/// the command-name chain leading to these commands, used to build the auth
+/// request.
+fn visible<'a>(commands: &'a [Command], cli: &Cli, parent_path: &[&str]) -> Vec<&'a Command> {
     commands
         .iter()
-        .filter(|c| !c.hidden && !c.requires_auth)
+        .filter(|c| is_visible(c, cli, parent_path))
         .collect()
+}
+
+/// Without the `auth` feature, `requires_auth` is inert: only `hidden` hides a
+/// command from help.
+#[cfg(not(feature = "auth"))]
+fn is_visible(command: &Command, _cli: &Cli, _parent_path: &[&str]) -> bool {
+    !command.hidden
+}
+
+/// With the `auth` feature, an auth-gated command is listed only when the hook
+/// authorizes it.
+#[cfg(feature = "auth")]
+fn is_visible(command: &Command, cli: &Cli, parent_path: &[&str]) -> bool {
+    if command.hidden {
+        return false;
+    }
+    if !command.requires_auth {
+        return true;
+    }
+    let mut path: Vec<&str> = parent_path.to_vec();
+    path.push(command.name.as_str());
+    let request = crate::auth::AuthRequest::new(&path);
+    cli.authorizer.is_some_and(|hook| hook(&request))
 }
 
 fn push_header(out: &mut String, cli: &Cli) {

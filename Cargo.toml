@@ -3,7 +3,7 @@
 # =============================================================================
 [package]
 name    = "cli-forge"
-version = "0.4.0"
+version = "0.5.0"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.85"
@@ -50,9 +50,9 @@ std = []
 # ANSI / styled output. Disable for plain output (the API stays complete; every
 # styled value renders as its plain text). Implies `std`: rendering needs it.
 color = ["std", "dep:enable-ansi-support"]
-# Reserved for enforcement of the `requires_auth` command flag (auth seam,
-# v0.5.0). No effect yet; declared so the documented surface matches the crate.
-auth = []
+# Enforcement of the `requires_auth` command flag via the auth hook seam. Adds
+# `App::auth` and `AuthRequest`. Implies `std` (part of the command layer).
+auth = ["std"]
 
 
 # DEPENDENCIES
@@ -109,6 +109,10 @@ required-features = ["std"]
 [[example]]
 name             = "commands"
 required-features = ["std"]
+
+[[example]]
+name             = "auth"
+required-features = ["auth"]
 
 
 # RELEASE PROFILE

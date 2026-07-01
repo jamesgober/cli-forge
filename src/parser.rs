@@ -22,6 +22,10 @@ pub(crate) struct Cli<'a> {
     pub(crate) footer: Option<&'a str>,
     pub(crate) version: Option<&'a str>,
     pub(crate) commands: &'a [Command],
+    /// The authorization hook, consulted when generating help so auth-gated
+    /// commands appear only when authorized.
+    #[cfg(feature = "auth")]
+    pub(crate) authorizer: Option<&'a crate::auth::AuthHook>,
 }
 
 fn is_help(token: &str) -> bool {

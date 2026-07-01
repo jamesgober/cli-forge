@@ -55,6 +55,14 @@ pub enum ParseError {
     /// Not an error: `-V` / `--version` was requested. Carries the version
     /// string. Handled like [`HelpRequested`](ParseError::HelpRequested).
     VersionRequested(String),
+    /// An auth-gated command ([`Command::requires_auth`](crate::Command::requires_auth))
+    /// was invoked but the app's auth hook did not authorize it (or no hook was
+    /// set). Produced only with the `auth` feature enabled; the command's handler
+    /// does not run.
+    Unauthorized {
+        /// The command that was refused.
+        command: String,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -73,6 +81,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::HelpRequested(text) | ParseError::VersionRequested(text) => {
                 write!(f, "{text}")
+            }
+            ParseError::Unauthorized { command } => {
+                write!(f, "not authorized to run: {command}")
             }
         }
     }

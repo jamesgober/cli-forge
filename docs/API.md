@@ -18,11 +18,11 @@
 
 > Complete reference for every public item in `cli-forge`, with examples.
 >
-> **Status:** the output layer (`out`/`err`, the three styling paths, the color
-> model), the command layer (`App`, `Command`, `Arg`, `Matches`, `ParseError`),
-> and the help engine (auto-generated help, aliases, `--help`, `--version`) are
-> implemented and stable as of **v0.4.0**. The auth seam (v0.5.0) follows; the
-> public surface freezes at 1.0. See [`dev/ROADMAP.md`](../dev/ROADMAP.md).
+> **Status: the public surface is FROZEN as of v0.5.0.** The output layer, the
+> command layer, the help engine, and the auth seam are all implemented. The
+> remaining 0.x releases add tests, docs, and internal optimization only — the
+> surface documented here becomes the 1.0 contract. See
+> [Stability](#stability) and [`dev/ROADMAP.md`](../dev/ROADMAP.md).
 
 ## Table of Contents
 
@@ -38,7 +38,9 @@
 - [Arguments: `Arg`](#arguments)
 - [Parsed results: `Matches`](#matches-section)
 - [Errors: `ParseError`](#errors)
+- [Auth seam](#auth)
 - [Feature flags](#feature-flags)
+- [Stability](#stability)
 - [Performance notes](#performance)
 
 ---
@@ -54,11 +56,12 @@ It owns parsing, output, command registration, and help. It does NOT own tables,
 progress bars, gradients, layouts, or shells — those are sibling crates in the
 cli collection that build on this crate's output API.
 
-As of v0.4.0 the output layer, the command layer, and the help engine are all in
-place: a near-direct plain path (`out`/`err`) and three ways to add color that all
-render to identical bytes, over one cross-platform terminal backend; a recursive
-command tree with runtime registration, aliases, arg/flag parsing, and structured
-non-panicking errors; and auto-generated `--help` / `--version`.
+As of v0.5.0 the framework is feature-complete: a near-direct plain path
+(`out`/`err`) and three ways to add color that all render to identical bytes, over
+one cross-platform terminal backend; a recursive command tree with runtime
+registration, aliases, arg/flag parsing, and structured non-panicking errors;
+auto-generated `--help` / `--version`; and an auth seam that gates commands behind
+a consumer-supplied hook.
 
 ---
 
@@ -66,7 +69,7 @@ non-panicking errors; and auto-generated `--help` / `--version`.
 
 ```toml
 [dependencies]
-cli-forge = "0.4"
+cli-forge = "0.5"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -74,7 +77,14 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.4", default-features = false, features = ["std"] }
+cli-forge = { version = "0.5", default-features = false, features = ["std"] }
+```
+
+For the auth seam, enable the `auth` feature:
+
+```toml
+[dependencies]
+cli-forge = { version = "0.5", features = ["auth"] }
 ```
 
 ---
@@ -471,7 +481,7 @@ handler with `run`.
 | `.arg(arg)` | Accept an [`Arg`](#arguments). Positionals fill in declaration order. |
 | `.subcommand(cmd)` | Nest a child command; composes to any depth. |
 | `.hidden(yes)` | Hide from generated help while staying invokable. |
-| `.requires_auth(yes)` | Mark as auth-gated. Stored now; enforced with the auth seam (v0.5.0). Omitted from help until then. |
+| `.requires_auth(yes)` | Mark as auth-gated. With the `auth` feature, runs and shows in help only when the [auth hook](#auth) authorizes it; inert without the feature. |
 | `.run(handler)` | `Fn(&Matches) + 'static` run when this command is selected. |
 
 `name`, `text` accept anything `Into<String>`. An alias resolves to the canonical
@@ -626,6 +636,7 @@ layer and exits. The enum is `#[non_exhaustive]`.
 | `UnexpectedArgument { value }` | A surplus value with nowhere to go. |
 | `HelpRequested(String)` | Not an error: `-h`/`--help` was requested. Carries the rendered help. |
 | `VersionRequested(String)` | Not an error: `-V`/`--version` was requested. Carries the version. |
+| `Unauthorized { command }` | An auth-gated command was invoked without authorization (feature `auth`). |
 
 `ParseError` implements `Display` and `std::error::Error`. The last two variants
 are control signals, not failures: `parse` prints them to standard output and
@@ -645,17 +656,77 @@ match app.try_parse_from(["build", "-j"]) {
 
 ---
 
+<h2 id="auth">Auth seam (feature <code>auth</code>)</h2>
+
+cli-forge holds the *seam*, not the logic. A command marked `.requires_auth(true)`
+runs — and appears in help — only when the app's authorization hook allows it. The
+hook, supplied by the consumer (or a sibling `cli-auth` crate), is where
+login/logout state actually lives; the core just asks.
+
+| Item | Description |
+|------|-------------|
+| `App::auth(hook)` | Set the hook: `Fn(&AuthRequest) -> bool + 'static`. |
+| `AuthRequest::command() -> &str` | The name of the command being authorized. |
+| `AuthRequest::path() -> &[&str]` | The full command-name chain (e.g. `["remote", "add"]`). |
+| `ParseError::Unauthorized { command }` | Returned when an auth-gated command is refused. |
+
+- **Fail closed.** With no hook set, auth-gated commands are never authorized —
+  they neither run nor appear in help.
+- **Enforcement point.** The hook is consulted after a successful parse, before
+  the command's handler runs. A refusal returns `Unauthorized` (handler skipped);
+  under [`parse`](#app-parse) that prints to standard error and exits `2`.
+- **Help.** An unauthorized auth-gated command is omitted from help listings. The
+  hook is consulted during help generation too, so it should be **pure and
+  cheap** — check already-loaded session state, don't do I/O.
+- **Without the feature.** `requires_auth` is inert: the command runs and shows
+  normally. `App::auth` and `AuthRequest` are absent.
+
+```rust
+# #[cfg(feature = "auth")]
+# {
+use cli_forge::{App, Command, ParseError};
+
+let mut app = App::new("demo").auth(|req| {
+    // Authorize everything except `publish` (until the session is valid).
+    req.command() != "publish"
+});
+app.register(Command::new("status").run(|_| { /* open */ }));
+app.register(Command::new("publish").requires_auth(true).run(|_| { /* gated */ }));
+
+// `status` runs; `publish` is refused.
+assert!(app.try_parse_from(["status"]).is_ok());
+let err = app.try_parse_from(["publish"]).unwrap_err();
+assert!(matches!(err, ParseError::Unauthorized { .. }));
+# }
+```
+
+---
+
 <h2 id="feature-flags">Feature flags</h2>
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `std` | yes | Standard library: terminal detection and the stdout/stderr writers. |
+| `std` | yes | Standard library: terminal detection, the stdout/stderr writers, and the command layer. |
 | `color` | yes | ANSI / styled output. Implies `std`. Disable for plain output (still complete). |
-| `auth` | no | Reserved for enforcement of the `requires_auth` command flag (v0.5.0); no effect yet. |
+| `auth` | no | The [auth seam](#auth): `App::auth`, `AuthRequest`, and enforcement of `requires_auth`. Implies `std`. |
 
 cli-forge's core has no heavy mandatory dependencies. The only platform-specific
 piece is enabling the Windows console's ANSI mode, pulled in by `color` on Windows
-targets alone.
+targets alone. The `auth` feature adds no dependencies.
+
+---
+
+<h2 id="stability">Stability</h2>
+
+The public surface documented above is **frozen as of v0.5.0**. It is
+feature-complete: the remaining 0.x releases add tests, documentation, and
+internal optimization, plus strictly-additive conveniences — they do not change or
+remove existing API. This surface becomes the 1.0 contract, after which it follows
+SemVer strictly (a breaking change requires a MAJOR bump).
+
+Frozen public items: `out`, `err`, `parse`, `style` / `Style`, `define_tag` /
+`tag` / `Tag`, `App`, `Command`, `Arg`, `Matches`, `ParseError`, and — behind the
+`auth` feature — `App::auth` / `AuthRequest`.
 
 ---
 

@@ -164,9 +164,13 @@ impl Command {
         self
     }
 
-    /// Mark the command as requiring authentication. The flag is recorded now;
-    /// enforcement arrives with the auth seam (v0.5.0). Until then the command
-    /// runs normally.
+    /// Mark the command as requiring authentication.
+    ///
+    /// With the `auth` feature enabled, the command runs — and appears in help —
+    /// only when the app's [`auth`](crate::App::auth) hook authorizes it;
+    /// otherwise invoking it yields
+    /// [`ParseError::Unauthorized`](crate::ParseError::Unauthorized). Without the
+    /// `auth` feature the flag is inert (the command runs and shows normally).
     ///
     /// # Examples
     ///

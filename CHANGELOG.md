@@ -21,6 +21,40 @@
 
 ---
 
+## [0.5.0] - 2026-07-01
+
+The auth seam, and the public surface declared frozen ahead of 1.0.
+
+### Added
+
+- `App::auth(hook)` (feature `auth`): the authorization seam. The hook —
+  `Fn(&AuthRequest) -> bool`, supplied by the consumer — decides whether an
+  auth-gated command may run. cli-forge holds the seam; the login/logout logic
+  lives in the consumer or a sibling crate.
+- `AuthRequest` (feature `auth`): the `#[non_exhaustive]` context passed to the
+  hook, naming the command being authorized (`command()`, `path()`).
+- `ParseError::Unauthorized { command }`: returned when an auth-gated command is
+  invoked without authorization. The handler does not run.
+- `examples/auth.rs`: an auth-gated command that runs only when authorized.
+
+### Changed
+
+- `Command::requires_auth` is now enforced with the `auth` feature: an auth-gated
+  command runs — and appears in help — only when the hook authorizes it, and
+  fails closed when no hook is set. Without the `auth` feature the flag is inert
+  (the command runs and shows normally).
+- The `auth` feature now enables the seam (was a reserved no-op) and implies `std`.
+- `docs/API.md` documents the auth seam and **declares the public surface frozen**:
+  the remaining 0.x releases add tests, docs, and optimization only, and 0.5.0's
+  surface becomes the 1.0 contract.
+
+### Security
+
+- Auth-gated commands fail closed: with the `auth` feature and no hook set, they
+  are never authorized (neither run nor listed in help).
+
+---
+
 ## [0.4.0] - 2026-06-30
 
 The help engine, plus the small conveniences a base CLI is expected to have:
@@ -165,7 +199,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/jamesgober/cli-forge/compare/v0.2.0...v0.2.5

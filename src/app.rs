@@ -39,13 +39,14 @@ use crate::parser::{self, Cli};
 ///
 /// let _matches = app.parse();
 /// ```
-#[derive(Debug)]
 pub struct App {
     name: String,
     version: Option<String>,
     help_header: Option<String>,
     help_footer: Option<String>,
     commands: Vec<Command>,
+    #[cfg(feature = "auth")]
+    auth_hook: Option<crate::auth::AuthHook>,
 }
 
 impl App {
@@ -65,7 +66,41 @@ impl App {
             help_header: None,
             help_footer: None,
             commands: Vec::new(),
+            #[cfg(feature = "auth")]
+            auth_hook: None,
         }
+    }
+
+    /// Set the authorization hook that enforces
+    /// [`Command::requires_auth`](crate::Command::requires_auth).
+    ///
+    /// The hook receives an [`AuthRequest`](crate::AuthRequest) naming the command
+    /// being authorized and returns whether to allow it. An auth-gated command
+    /// runs only if the hook returns `true`; otherwise parsing yields
+    /// [`ParseError::Unauthorized`] and the handler does not run. Without a hook,
+    /// auth-gated commands are never authorized (the seam fails closed).
+    ///
+    /// Requires the `auth` feature.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "auth")]
+    /// # {
+    /// use cli_forge::{App, Command, ParseError};
+    ///
+    /// let mut app = App::new("demo").auth(|req| req.command() != "publish");
+    /// app.register(Command::new("publish").requires_auth(true).run(|_| {}));
+    ///
+    /// let err = app.try_parse_from(["publish"]).unwrap_err();
+    /// assert!(matches!(err, ParseError::Unauthorized { .. }));
+    /// # }
+    /// ```
+    #[cfg(feature = "auth")]
+    #[must_use]
+    pub fn auth(mut self, hook: impl Fn(&crate::auth::AuthRequest<'_>) -> bool + 'static) -> App {
+        self.auth_hook = Some(Box::new(hook));
+        self
     }
 
     /// Set the version reported by `-V` / `--version`.
@@ -214,6 +249,8 @@ impl App {
     {
         let tokens: Vec<String> = args.into_iter().map(Into::into).collect();
         let matches = parser::parse_app(&self.cli(), &tokens)?;
+        #[cfg(feature = "auth")]
+        self.enforce_auth(&matches)?;
         self.dispatch(&matches);
         Ok(matches)
     }
@@ -226,7 +263,42 @@ impl App {
             footer: self.help_footer.as_deref(),
             version: self.version.as_deref(),
             commands: &self.commands,
+            #[cfg(feature = "auth")]
+            authorizer: self.auth_hook.as_ref(),
         }
+    }
+
+    /// Refuse the resolved command if it is auth-gated and the hook does not
+    /// authorize it. Fails closed when no hook is set.
+    #[cfg(feature = "auth")]
+    fn enforce_auth(&self, matches: &Matches) -> Result<(), ParseError> {
+        if let Some((path, leaf)) = self.resolve_path(matches) {
+            if leaf.requires_auth {
+                let request = crate::auth::AuthRequest::new(&path);
+                let authorized = self.auth_hook.as_ref().is_some_and(|hook| hook(&request));
+                if !authorized {
+                    return Err(ParseError::Unauthorized {
+                        command: leaf.name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Walk the resolved subcommand chain, returning the command-name path and
+    /// the deepest (leaf) command.
+    #[cfg(feature = "auth")]
+    fn resolve_path(&self, matches: &Matches) -> Option<(Vec<&str>, &Command)> {
+        let (name, mut sub) = matches.subcommand()?;
+        let mut command = self.commands.iter().find(|c| c.name == name)?;
+        let mut path = vec![command.name.as_str()];
+        while let Some((sub_name, next)) = sub.subcommand() {
+            command = command.find_subcommand(sub_name)?;
+            path.push(command.name.as_str());
+            sub = next;
+        }
+        Some((path, command))
     }
 
     /// Run the handler of the deepest command the parse resolved to.
@@ -238,11 +310,28 @@ impl App {
         }
     }
 
-    /// The registered commands that are not hidden. Drives the help engine
-    /// (v0.4.0); used today to verify hidden commands are excluded from listings.
+    /// The registered commands that are not hidden. Used in tests to verify
+    /// hidden commands are excluded from listings.
     #[cfg(test)]
     pub(crate) fn visible_commands(&self) -> impl Iterator<Item = &Command> {
         self.commands.iter().filter(|c| !c.hidden)
+    }
+}
+
+impl std::fmt::Debug for App {
+    // `DebugStruct::field` returns `&mut Self` for chaining; discarding those
+    // returns is the builder pattern, not a dropped result.
+    #[allow(unused_results)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("App");
+        s.field("name", &self.name);
+        s.field("version", &self.version);
+        s.field("help_header", &self.help_header);
+        s.field("help_footer", &self.help_footer);
+        s.field("commands", &self.commands);
+        #[cfg(feature = "auth")]
+        s.field("has_auth_hook", &self.auth_hook.is_some());
+        s.finish()
     }
 }
 
@@ -348,14 +437,15 @@ mod tests {
         assert_eq!(err, ParseError::MissingRequired { arg: "name".into() });
     }
 
+    #[cfg(not(feature = "auth"))]
     #[test]
-    fn test_requires_auth_flag_is_stored_not_enforced() {
+    fn test_requires_auth_is_inert_without_auth_feature() {
         let mut app = App::new("demo");
         static RAN: AtomicUsize = AtomicUsize::new(0);
         app.register(Command::new("publish").requires_auth(true).run(|_| {
             let _ = RAN.fetch_add(1, Ordering::SeqCst);
         }));
-        // Enforcement arrives in v0.5.0; for now the command still runs.
+        // Without the `auth` feature the flag does nothing: the command runs.
         let _ = app.try_parse_from(["publish"]).unwrap();
         assert_eq!(RAN.load(Ordering::SeqCst), 1);
     }
@@ -415,15 +505,22 @@ mod tests {
     }
 
     #[test]
-    fn test_help_hides_hidden_and_auth_commands() {
+    fn test_help_hides_hidden_commands() {
         let help = help_demo().help();
         assert!(help.contains("build"));
         assert!(help.contains("compile the project"));
-        // Hidden and auth-gated commands are absent from help.
+        // Hidden commands are always absent from help.
         assert!(!help.contains("secret"));
         assert!(!help.contains("do not show me"));
-        assert!(!help.contains("publish"));
-        assert!(!help.contains("gated"));
+    }
+
+    #[cfg(not(feature = "auth"))]
+    #[test]
+    fn test_help_shows_auth_command_without_auth_feature() {
+        // Without the `auth` feature, `requires_auth` is inert — the command is
+        // listed like any other.
+        let help = help_demo().help();
+        assert!(help.contains("publish"));
     }
 
     #[test]
@@ -495,6 +592,91 @@ mod tests {
         app.register(Command::new("run").arg(Arg::flag("help")));
         let matches = app.try_parse_from(["run", "--help"]).unwrap();
         assert!(matches.subcommand().unwrap().1.flag("help"));
+    }
+
+    // --- Auth seam (requires the `auth` feature) ---
+
+    #[cfg(feature = "auth")]
+    fn auth_app(ran: &'static AtomicUsize) -> App {
+        let mut app = App::new("demo");
+        app.register(Command::new("publish").requires_auth(true).run(move |_| {
+            let _ = ran.fetch_add(1, Ordering::SeqCst);
+        }));
+        app
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_auth_gated_command_blocked_without_hook() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let app = auth_app(&RAN);
+        // No hook set → fail closed.
+        let err = app.try_parse_from(["publish"]).unwrap_err();
+        assert_eq!(
+            err,
+            ParseError::Unauthorized {
+                command: "publish".into()
+            }
+        );
+        assert_eq!(RAN.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_auth_gated_command_refused_when_hook_denies() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let app = auth_app(&RAN).auth(|_| false);
+        let err = app.try_parse_from(["publish"]).unwrap_err();
+        assert!(matches!(err, ParseError::Unauthorized { .. }));
+        assert_eq!(RAN.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_auth_gated_command_runs_when_authorized() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let app = auth_app(&RAN).auth(|_| true);
+        let _ = app.try_parse_from(["publish"]).unwrap();
+        assert_eq!(RAN.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_auth_hook_receives_command_name() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        // Authorize everything except `publish`.
+        let app = auth_app(&RAN).auth(|req| req.command() != "publish");
+        let err = app.try_parse_from(["publish"]).unwrap_err();
+        assert!(matches!(err, ParseError::Unauthorized { .. }));
+        assert_eq!(RAN.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_non_auth_command_ignores_hook() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let mut app = App::new("demo").auth(|_| false);
+        app.register(Command::new("status").run(move |_| {
+            let _ = RAN.fetch_add(1, Ordering::SeqCst);
+        }));
+        // A command without `requires_auth` runs regardless of the (denying) hook.
+        let _ = app.try_parse_from(["status"]).unwrap();
+        assert_eq!(RAN.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn test_help_lists_auth_command_only_when_authorized() {
+        let build = |authorize: bool| {
+            let mut app = App::new("demo").auth(move |_| authorize);
+            app.register(Command::new("publish").requires_auth(true).about("ship it"));
+            app.register(Command::new("build").about("compile"));
+            app
+        };
+        assert!(!build(false).help().contains("publish"));
+        assert!(build(true).help().contains("publish"));
+        // A non-gated command is listed either way.
+        assert!(build(false).help().contains("build"));
     }
 }
 

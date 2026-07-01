@@ -60,15 +60,15 @@ Exit criteria:
 
 ---
 
-## v0.5.0 — Auth seam, feature freeze
+## v0.5.0 — Auth seam, feature freeze (DONE)
 
 The auth hook that enforces `requires_auth` (login/logout state supplied by the
 consumer or a sibling `cli-auth` crate — core holds the seam, not the logic).
 Public surface declared frozen.
 
 Exit criteria:
-- [ ] An auth-gated command does not run unless the hook authorizes it (test).
-- [ ] API surface documented as frozen in `docs/API.md`.
+- [x] An auth-gated command does not run unless the hook authorizes it (test). (`App::auth` hook; `enforce_auth` fails closed; tested both feature sets.)
+- [x] API surface documented as frozen in `docs/API.md`. (See the Stability section.)
 
 ---
 

@@ -35,8 +35,9 @@
 
 ## What's here
 
-As of `v0.4.0`, the **output layer**, the **command layer**, and the **help
-engine** are implemented and stable:
+As of `v0.5.0` the framework is **feature-complete and the public surface is
+frozen** — the output layer, command layer, help engine, and auth seam are all in
+place:
 
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
   string literal. The hot path stays cheap.
@@ -52,8 +53,12 @@ engine** are implemented and stable:
 - **Help & version** — auto-generated `--help` / `-h` (top-level and per-command)
   and `--version` / `-V`, rendered through the output layer with injectable
   header/footer.
+- **Auth seam** *(feature `auth`)* — gate a command behind a consumer-supplied
+  authorization hook. cli-forge holds the seam; the login state lives in your code.
+  Fails closed, and hides unauthorized commands from help.
 
-The auth seam (`v0.5.0`) lands next — see the [`ROADMAP`](./dev/ROADMAP.md).
+The remaining `0.x` releases are docs, tests, and optimization only — this surface
+is the `1.0` contract. See the [`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>
@@ -62,7 +67,7 @@ The auth seam (`v0.5.0`) lands next — see the [`ROADMAP`](./dev/ROADMAP.md).
 
 ```toml
 [dependencies]
-cli-forge = "0.4"
+cli-forge = "0.5"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -70,7 +75,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.4", default-features = false, features = ["std"] }
+cli-forge = { version = "0.5", default-features = false, features = ["std"] }
 ```
 
 <br>
@@ -199,7 +204,7 @@ as `ParseError::HelpRequested` / `VersionRequested` control signals.
 |---------|---------|-------------|
 | `std` | yes | Standard library: terminal detection, the stdout/stderr writers, and the command layer. |
 | `color` | yes | ANSI / styled output. Implies `std`. Disable for plain output (still complete). |
-| `auth` | no | Reserved for the `requires_auth` command flag (v0.5.0); no effect yet. |
+| `auth` | no | The auth seam: `App::auth`, `AuthRequest`, and enforcement of `requires_auth`. Implies `std`; adds no dependencies. |
 
 <br>
 
@@ -246,10 +251,10 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v0.4.0` ships the help engine (plus aliases and version) on top of the command
-and output layers, per the [`ROADMAP`](./dev/ROADMAP.md) and
-[`docs/API.md`](./docs/API.md). The auth seam (`v0.5.0`) follows; the public API
-freezes at `1.0.0`.
+`v0.5.0` ships the auth seam and **declares the public surface frozen**, per the
+[`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md). The remaining
+`0.x` releases add tests, docs, and optimization only; `1.0.0` is the formal
+freeze.
 
 <hr>
 <br>

@@ -94,6 +94,8 @@
 mod app;
 #[cfg(feature = "std")]
 mod arg;
+#[cfg(feature = "auth")]
+mod auth;
 #[cfg(feature = "std")]
 mod color;
 #[cfg(feature = "std")]
@@ -124,6 +126,8 @@ mod crosspath_tests;
 pub use crate::app::App;
 #[cfg(feature = "std")]
 pub use crate::arg::Arg;
+#[cfg(feature = "auth")]
+pub use crate::auth::AuthRequest;
 #[cfg(feature = "std")]
 pub use crate::command::Command;
 #[cfg(feature = "std")]
