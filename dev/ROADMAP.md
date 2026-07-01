@@ -47,15 +47,16 @@ Exit criteria:
 
 ---
 
-## v0.4.0 — Help engine + customization
+## v0.4.0 — Help engine + customization (DONE)
 
 Auto-generated help rendered through the output layer, with injectable
 `help_header`/`help_footer` slots and per-command styling. Errors render through
-the same system.
+the same system. Also folded in the small conveniences a base CLI expects:
+command aliases, `--help`/`-h`, and `--version`/`-V`.
 
 Exit criteria:
-- [ ] Help is styleable and respects custom header/footer (snapshot test).
-- [ ] Hidden/auth-gated commands honored in help generation.
+- [x] Help is styleable and respects custom header/footer (test). (Section headers styled through the output layer; `App::help()` + header/footer asserted.)
+- [x] Hidden/auth-gated commands honored in help generation. (Both excluded from listings; tested.)
 
 ---
 

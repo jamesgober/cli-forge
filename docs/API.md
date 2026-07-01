@@ -19,10 +19,10 @@
 > Complete reference for every public item in `cli-forge`, with examples.
 >
 > **Status:** the output layer (`out`/`err`, the three styling paths, the color
-> model) and the command layer (`App`, `Command`, `Arg`, `Matches`, `ParseError`)
-> are implemented and stable as of **v0.3.0**. The help engine (v0.4.0) and auth
-> seam (v0.5.0) follow; the public surface freezes at 1.0. See
-> [`dev/ROADMAP.md`](../dev/ROADMAP.md).
+> model), the command layer (`App`, `Command`, `Arg`, `Matches`, `ParseError`),
+> and the help engine (auto-generated help, aliases, `--help`, `--version`) are
+> implemented and stable as of **v0.4.0**. The auth seam (v0.5.0) follows; the
+> public surface freezes at 1.0. See [`dev/ROADMAP.md`](../dev/ROADMAP.md).
 
 ## Table of Contents
 
@@ -54,11 +54,11 @@ It owns parsing, output, command registration, and help. It does NOT own tables,
 progress bars, gradients, layouts, or shells — those are sibling crates in the
 cli collection that build on this crate's output API.
 
-As of v0.3.0 the output layer and the command layer are both in place: a
-near-direct plain path (`out`/`err`) and three ways to add color that all render
-to identical bytes, over one cross-platform terminal backend; and a recursive
-command tree with runtime registration, arg/flag parsing, and structured,
-non-panicking errors.
+As of v0.4.0 the output layer, the command layer, and the help engine are all in
+place: a near-direct plain path (`out`/`err`) and three ways to add color that all
+render to identical bytes, over one cross-platform terminal backend; a recursive
+command tree with runtime registration, aliases, arg/flag parsing, and structured
+non-panicking errors; and auto-generated `--help` / `--version`.
 
 ---
 
@@ -66,7 +66,7 @@ non-panicking errors.
 
 ```toml
 [dependencies]
-cli-forge = "0.3"
+cli-forge = "0.4"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -74,7 +74,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.3", default-features = false, features = ["std"] }
+cli-forge = { version = "0.4", default-features = false, features = ["std"] }
 ```
 
 ---
@@ -466,14 +466,23 @@ handler with `run`.
 | Method | Description |
 |--------|-------------|
 | `Command::new(name)` | Create a command with the given invocation name. |
-| `.about(text)` | One-line description (shown in help, v0.4.0). |
+| `.alias(name)` / `.aliases(iter)` | Alternative invocation names. Resolve to the canonical command; shown in help. |
+| `.about(text)` | One-line description, shown in help. |
 | `.arg(arg)` | Accept an [`Arg`](#arguments). Positionals fill in declaration order. |
 | `.subcommand(cmd)` | Nest a child command; composes to any depth. |
 | `.hidden(yes)` | Hide from generated help while staying invokable. |
-| `.requires_auth(yes)` | Mark as auth-gated. Stored now; enforced with the auth seam (v0.5.0). |
+| `.requires_auth(yes)` | Mark as auth-gated. Stored now; enforced with the auth seam (v0.5.0). Omitted from help until then. |
 | `.run(handler)` | `Fn(&Matches) + 'static` run when this command is selected. |
 
-`name`, `text` accept anything `Into<String>`.
+`name`, `text` accept anything `Into<String>`. An alias resolves to the canonical
+command — `matches.subcommand()` reports the canonical name regardless of which
+alias was typed.
+
+**Help and version are automatic.** `-h` / `--help` at any level renders that
+level's help (top-level or a specific command); `-V` / `--version` prints
+`App::version(...)` if set. A command can override the built-ins by declaring its
+own `help` / `h` argument. Hidden and auth-gated commands are omitted from help
+listings.
 
 ### `App`
 
@@ -482,10 +491,12 @@ The registry and entry point.
 | Method | Description |
 |--------|-------------|
 | `App::new(name)` | Create an application with the program name. |
-| `.help_header(text)` / `.help_footer(text)` | Header/footer for generated help (v0.4.0). |
+| `.version(text)` | Set the version reported by `-V` / `--version`. Without it, those flags are ordinary unknown flags. |
+| `.help_header(text)` / `.help_footer(text)` | Header/footer wrapping every generated help page. |
 | `.register(&mut self, cmd)` | Add a top-level command. Callable from any module, any time before parsing. |
-| `.parse() -> Matches` | <a id="app-parse"></a>Parse `std::env::args()`, run the handler, return matches. On malformed input prints a structured error and **exits with status 2** — never panics. |
-| `.try_parse_from(args) -> Result<Matches, ParseError>` | Non-exiting twin: takes an explicit arg list (excluding the program name), runs the handler, returns the matches or a structured error. Ideal for embedding and tests. |
+| `.help() -> String` | Render the top-level help on demand (e.g. a no-command fallback). |
+| `.parse() -> Matches` | <a id="app-parse"></a>Parse `std::env::args()`, run the handler, return matches. `-h`/`--help` and `-V`/`--version` print to stdout and **exit 0**; malformed input prints a structured error to stderr and **exits 2** — never panics. |
+| `.try_parse_from(args) -> Result<Matches, ParseError>` | Non-exiting twin: takes an explicit arg list (excluding the program name), runs the handler, returns the matches or a structured error (including the `HelpRequested`/`VersionRequested` signals). Ideal for embedding and tests. |
 
 **Registration from anywhere.** `register` takes `&mut App`, so a command built
 in any module — a plugin, a feature module, a config loop — is reachable and
@@ -613,8 +624,12 @@ layer and exits. The enum is `#[non_exhaustive]`.
 | `MissingRequired { arg }` | A required argument omitted (and no default). |
 | `UnknownCommand { name }` | A token where a registered subcommand was expected. |
 | `UnexpectedArgument { value }` | A surplus value with nowhere to go. |
+| `HelpRequested(String)` | Not an error: `-h`/`--help` was requested. Carries the rendered help. |
+| `VersionRequested(String)` | Not an error: `-V`/`--version` was requested. Carries the version. |
 
-`ParseError` implements `Display` and `std::error::Error`.
+`ParseError` implements `Display` and `std::error::Error`. The last two variants
+are control signals, not failures: `parse` prints them to standard output and
+exits `0`; `try_parse_from` callers should do the same.
 
 ```rust
 use cli_forge::{App, Arg, Command, ParseError};

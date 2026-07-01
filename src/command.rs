@@ -37,6 +37,7 @@ type Handler = Box<dyn Fn(&Matches)>;
 /// ```
 pub struct Command {
     pub(crate) name: String,
+    pub(crate) aliases: Vec<String>,
     pub(crate) about: Option<String>,
     pub(crate) args: Vec<Arg>,
     pub(crate) subcommands: Vec<Command>,
@@ -58,6 +59,7 @@ impl Command {
     pub fn new(name: impl Into<String>) -> Command {
         Command {
             name: name.into(),
+            aliases: Vec::new(),
             about: None,
             args: Vec::new(),
             subcommands: Vec::new(),
@@ -65,6 +67,39 @@ impl Command {
             requires_auth: false,
             handler: None,
         }
+    }
+
+    /// Add an alternative name that also invokes this command. Chain it to add
+    /// several. Aliases are shown alongside the name in help.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Command;
+    /// let cmd = Command::new("remove").alias("rm").alias("del");
+    /// ```
+    #[must_use]
+    pub fn alias(mut self, alias: impl Into<String>) -> Command {
+        self.aliases.push(alias.into());
+        self
+    }
+
+    /// Add several alternative names at once.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Command;
+    /// let cmd = Command::new("remove").aliases(["rm", "del"]);
+    /// ```
+    #[must_use]
+    pub fn aliases<I, S>(mut self, aliases: I) -> Command
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.aliases.extend(aliases.into_iter().map(Into::into));
+        self
     }
 
     /// Set the one-line description shown in help.
@@ -170,9 +205,14 @@ impl Command {
         self.args.iter().find(|a| a.short == Some(short))
     }
 
-    /// Find a direct subcommand by name.
+    /// Whether `name` matches this command's name or any of its aliases.
+    pub(crate) fn matches_name(&self, name: &str) -> bool {
+        self.name == name || self.aliases.iter().any(|a| a == name)
+    }
+
+    /// Find a direct subcommand by name or alias.
     pub(crate) fn find_subcommand(&self, name: &str) -> Option<&Command> {
-        self.subcommands.iter().find(|c| c.name == name)
+        self.subcommands.iter().find(|c| c.matches_name(name))
     }
 
     /// The positional arguments, in declaration order.
@@ -185,6 +225,7 @@ impl fmt::Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Command")
             .field("name", &self.name)
+            .field("aliases", &self.aliases)
             .field("about", &self.about)
             .field("args", &self.args)
             .field("subcommands", &self.subcommands)

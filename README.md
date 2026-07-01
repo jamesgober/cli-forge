@@ -35,8 +35,8 @@
 
 ## What's here
 
-As of `v0.3.0`, the **output layer** and the **command layer** are implemented and
-stable:
+As of `v0.4.0`, the **output layer**, the **command layer**, and the **help
+engine** are implemented and stable:
 
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
   string literal. The hot path stays cheap.
@@ -46,12 +46,14 @@ stable:
 - **Full color** — the eight standard names plus any 24-bit color via hex or RGB,
   with graceful downgrade to 256- or 16-color terminals and clean fall-back to
   plain text on pipes, `NO_COLOR`, or the Windows console without ANSI.
-- **Command tree** — a recursive `Command` tree with arg/flag parsing, registered
-  into an `App` **from anywhere** (not just `main`), with `.hidden()` and
-  `.requires_auth()` flags and structured, non-panicking errors.
+- **Command tree** — a recursive `Command` tree with arg/flag parsing and
+  **aliases**, registered into an `App` **from anywhere** (not just `main`), with
+  `.hidden()` and `.requires_auth()` flags and structured, non-panicking errors.
+- **Help & version** — auto-generated `--help` / `-h` (top-level and per-command)
+  and `--version` / `-V`, rendered through the output layer with injectable
+  header/footer.
 
-The help engine (`v0.4.0`) and auth seam (`v0.5.0`) land across the rest of the
-0.x series — see the [`ROADMAP`](./dev/ROADMAP.md).
+The auth seam (`v0.5.0`) lands next — see the [`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>
@@ -60,7 +62,7 @@ The help engine (`v0.4.0`) and auth seam (`v0.5.0`) land across the rest of the
 
 ```toml
 [dependencies]
-cli-forge = "0.3"
+cli-forge = "0.4"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -68,7 +70,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.3", default-features = false, features = ["std"] }
+cli-forge = { version = "0.4", default-features = false, features = ["std"] }
 ```
 
 <br>
@@ -175,11 +177,19 @@ let _ = app.parse();
 
 Commands register **from anywhere** — a command built in a non-`main` module is
 reachable and behaves identically, the limitation that made the predecessor
-unusable. The parser handles the standard forms (`--long`, `--long=value`,
-`-s`, `-svalue`, bundled `-abc`, positionals, `--`), and malformed input becomes
-a structured `ParseError`: `parse` prints it and exits `2`, never panicking;
-`try_parse_from` returns it instead. `.hidden()` keeps a command invokable but out
-of help; `.requires_auth()` records the flag for the auth seam (`v0.5.0`).
+unusable. Give a command extra names with `.alias("rm")` / `.aliases(["rm", "del"])`;
+aliases resolve to the canonical command. The parser handles the standard forms
+(`--long`, `--long=value`, `-s`, `-svalue`, bundled `-abc`, positionals, `--`),
+and malformed input becomes a structured `ParseError`: `parse` prints it and exits
+`2`, never panicking; `try_parse_from` returns it instead. `.hidden()` keeps a
+command invokable but out of help; `.requires_auth()` records the flag for the auth
+seam (`v0.5.0`).
+
+**Help and version come for free.** `-h` / `--help` renders styled help for the
+app or any command (with your `help_header` / `help_footer`); `-V` / `--version`
+prints `App::version(...)`. `App::help()` renders the top-level help as a string
+whenever you want it. Both exit `0` under `parse`; `try_parse_from` returns them
+as `ParseError::HelpRequested` / `VersionRequested` control signals.
 
 <br>
 
@@ -236,9 +246,10 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v0.3.0` ships the command layer on top of `v0.2.5`'s output layer, per the
-[`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md). The help engine
-(`v0.4.0`) and the auth seam (`v0.5.0`) follow; the public API freezes at `1.0.0`.
+`v0.4.0` ships the help engine (plus aliases and version) on top of the command
+and output layers, per the [`ROADMAP`](./dev/ROADMAP.md) and
+[`docs/API.md`](./docs/API.md). The auth seam (`v0.5.0`) follows; the public API
+freezes at `1.0.0`.
 
 <hr>
 <br>

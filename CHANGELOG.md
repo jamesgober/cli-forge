@@ -21,6 +21,39 @@
 
 ---
 
+## [0.4.0] - 2026-06-30
+
+The help engine, plus the small conveniences a base CLI is expected to have:
+command aliases, `--help`/`-h`, and `--version`/`-V`.
+
+### Added
+
+- Auto-generated help rendered through the output layer: styled section headers,
+  aligned columns, a usage line, and command/argument/option listings. The
+  injectable `App::help_header` / `App::help_footer` wrap every page.
+- `App::help() -> String` renders the top-level help on demand (for a no-command
+  fallback, a `help` command, etc.).
+- `App::version(...)` and the `-V` / `--version` flags, printed to standard output
+  with exit `0`.
+- `-h` / `--help` at any command level renders that level's help (top-level or a
+  specific command), to standard output with exit `0`. A command may override the
+  built-in by declaring its own `help` / `h` argument.
+- `Command::alias(...)` / `Command::aliases(...)`: alternative invocation names.
+  Aliases resolve to the canonical command (the parsed subcommand name stays
+  canonical) and are shown alongside the name in help.
+- `ParseError::HelpRequested(String)` and `ParseError::VersionRequested(String)`
+  control signals (carrying the rendered text) so the exiting `parse` and the
+  non-exiting `try_parse_from` share one path.
+
+### Changed
+
+- Hidden and auth-gated commands are omitted from generated help listings
+  (auth-gated commands surface once the auth seam lands in v0.5.0).
+- `docs/API.md` documents the help engine, aliases, version, and the new
+  `ParseError` signals.
+
+---
+
 ## [0.3.0] - 2026-06-30
 
 The command layer: a recursive command tree, runtime registration from anywhere,
@@ -132,7 +165,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/jamesgober/cli-forge/compare/v0.2.0...v0.2.5
 [0.2.0]: https://github.com/jamesgober/cli-forge/compare/v0.1.0...v0.2.0

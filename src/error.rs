@@ -47,6 +47,14 @@ pub enum ParseError {
         /// The surplus value.
         value: String,
     },
+    /// Not an error: `-h` / `--help` was requested. Carries the rendered help
+    /// text. [`App::parse`](crate::App::parse) prints it to standard output and
+    /// exits `0`; callers of
+    /// [`App::try_parse_from`](crate::App::try_parse_from) should do the same.
+    HelpRequested(String),
+    /// Not an error: `-V` / `--version` was requested. Carries the version
+    /// string. Handled like [`HelpRequested`](ParseError::HelpRequested).
+    VersionRequested(String),
 }
 
 impl fmt::Display for ParseError {
@@ -62,6 +70,9 @@ impl fmt::Display for ParseError {
             ParseError::UnknownCommand { name } => write!(f, "unknown command: {name}"),
             ParseError::UnexpectedArgument { value } => {
                 write!(f, "unexpected argument: {value}")
+            }
+            ParseError::HelpRequested(text) | ParseError::VersionRequested(text) => {
+                write!(f, "{text}")
             }
         }
     }

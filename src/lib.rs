@@ -101,6 +101,8 @@ mod command;
 #[cfg(feature = "std")]
 mod error;
 #[cfg(feature = "std")]
+mod help;
+#[cfg(feature = "std")]
 mod matches;
 #[cfg(feature = "std")]
 mod output;

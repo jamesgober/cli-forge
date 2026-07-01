@@ -13,6 +13,7 @@ use cli_forge::{App, Arg, Command, out, style};
 
 fn main() {
     let mut app = App::new("demo")
+        .version(env!("CARGO_PKG_VERSION"))
         .help_header("demo — a cli-forge example")
         .help_footer("see https://github.com/jamesgober/cli-forge");
 
@@ -60,6 +61,7 @@ fn main() {
             )
             .subcommand(
                 Command::new("remove")
+                    .aliases(["rm", "del"])
                     .about("remove a remote")
                     .arg(Arg::positional("name").required(true))
                     .run(|m| out(format!("removed remote {}", m.value("name").unwrap_or("?")))),

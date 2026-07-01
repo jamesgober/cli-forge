@@ -1,26 +1,55 @@
 //! The argument parser.
 //!
-//! One function, [`parse_command`], turns a slice of raw tokens into a
-//! [`Matches`] for a command, recursing into subcommands. It handles the
-//! standard forms — `--long`, `--long=value`, `--long value`, `-s`, `-s value`,
-//! `-svalue`, bundled short flags `-abc`, positionals, and the `--`
-//! end-of-options marker — and reports every malformed case as a structured
-//! [`ParseError`] rather than panicking.
+//! [`parse_command`] turns a slice of raw tokens into a [`Matches`] for a
+//! command, recursing into subcommands. It handles the standard forms —
+//! `--long`, `--long=value`, `--long value`, `-s`, `-s value`, `-svalue`,
+//! bundled short flags `-abc`, positionals, and the `--` end-of-options marker —
+//! and reports every malformed case as a structured [`ParseError`] rather than
+//! panicking. `-h` / `--help` and `-V` / `--version` short-circuit into the
+//! corresponding [`ParseError`] control signals, carrying rendered text.
 
 use crate::arg::{Arg, ArgKind};
 use crate::command::Command;
 use crate::error::ParseError;
+use crate::help;
 use crate::matches::Matches;
 
-/// Resolve and parse a top-level invocation against an app's registered
+/// The application context threaded through parsing, so a help or version
+/// request can be rendered with the app name, header, footer, and version.
+pub(crate) struct Cli<'a> {
+    pub(crate) app_name: &'a str,
+    pub(crate) header: Option<&'a str>,
+    pub(crate) footer: Option<&'a str>,
+    pub(crate) version: Option<&'a str>,
+    pub(crate) commands: &'a [Command],
+}
+
+fn is_help(token: &str) -> bool {
+    token == "-h" || token == "--help"
+}
+
+fn is_version(token: &str) -> bool {
+    token == "-V" || token == "--version"
+}
+
+/// Resolve and parse a top-level invocation against the app's registered
 /// commands. The app level has no arguments of its own: the first token selects
-/// a command, and the rest are parsed by it.
-pub(crate) fn parse_app(commands: &[Command], tokens: &[String]) -> Result<Matches, ParseError> {
+/// a command (by name or alias), and the rest are parsed by it.
+pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseError> {
     let mut matches = Matches::default();
     let first = match tokens.first() {
         Some(token) => token,
         None => return Ok(matches),
     };
+
+    if is_help(first) {
+        return Err(ParseError::HelpRequested(help::render_app(cli)));
+    }
+    if let Some(version) = cli.version {
+        if is_version(first) {
+            return Err(ParseError::VersionRequested(version.to_owned()));
+        }
+    }
 
     if first.len() > 1 && first.starts_with('-') {
         return Err(ParseError::UnknownFlag {
@@ -28,20 +57,27 @@ pub(crate) fn parse_app(commands: &[Command], tokens: &[String]) -> Result<Match
         });
     }
 
-    let command =
-        commands
-            .iter()
-            .find(|c| &c.name == first)
-            .ok_or_else(|| ParseError::UnknownCommand {
-                name: first.clone(),
-            })?;
-    let sub = parse_command(command, &tokens[1..])?;
+    let command = cli
+        .commands
+        .iter()
+        .find(|c| c.matches_name(first))
+        .ok_or_else(|| ParseError::UnknownCommand {
+            name: first.clone(),
+        })?;
+    let sub = parse_command(cli, &[command.name.as_str()], command, &tokens[1..])?;
     matches.subcommand = Some((command.name.clone(), Box::new(sub)));
     Ok(matches)
 }
 
 /// Parse `tokens` against `command`, recursing into any invoked subcommand.
-pub(crate) fn parse_command(command: &Command, tokens: &[String]) -> Result<Matches, ParseError> {
+/// `path` is the command-name chain from the app root down to `command`, used to
+/// render the usage line if help is requested here.
+pub(crate) fn parse_command(
+    cli: &Cli,
+    path: &[&str],
+    command: &Command,
+    tokens: &[String],
+) -> Result<Matches, ParseError> {
     let mut matches = Matches::default();
     let positionals: Vec<&Arg> = command.positionals().collect();
     let mut next_positional = 0;
@@ -57,6 +93,26 @@ pub(crate) fn parse_command(command: &Command, tokens: &[String]) -> Result<Matc
                 i += 1;
                 continue;
             }
+
+            // Help / version short-circuit, unless the command defines a
+            // conflicting argument of the same name.
+            if is_help(token)
+                && command.find_long("help").is_none()
+                && command.find_short('h').is_none()
+            {
+                return Err(ParseError::HelpRequested(help::render_command(
+                    cli, path, command,
+                )));
+            }
+            if let Some(version) = cli.version {
+                if is_version(token)
+                    && command.find_long("version").is_none()
+                    && command.find_short('V').is_none()
+                {
+                    return Err(ParseError::VersionRequested(version.to_owned()));
+                }
+            }
+
             if let Some(body) = token.strip_prefix("--") {
                 i = parse_long(command, &mut matches, body, tokens, i)?;
                 continue;
@@ -66,7 +122,9 @@ pub(crate) fn parse_command(command: &Command, tokens: &[String]) -> Result<Matc
                 continue;
             }
             if let Some(sub) = command.find_subcommand(token) {
-                let sub_matches = parse_command(sub, &tokens[i + 1..])?;
+                let mut sub_path = path.to_vec();
+                sub_path.push(sub.name.as_str());
+                let sub_matches = parse_command(cli, &sub_path, sub, &tokens[i + 1..])?;
                 matches.subcommand = Some((sub.name.clone(), Box::new(sub_matches)));
                 break;
             }
