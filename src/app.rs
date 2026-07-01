@@ -478,6 +478,123 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_count_flag_bundled_separate_and_long() {
+        let mut app = App::new("demo");
+        app.register(Command::new("run").arg(Arg::count("verbose").short('v')));
+
+        let bundled = app.try_parse_from(["run", "-vvv"]).unwrap();
+        assert_eq!(bundled.subcommand().unwrap().1.count("verbose"), 3);
+
+        let mixed = app
+            .try_parse_from(["run", "-v", "-vv", "--verbose"])
+            .unwrap();
+        let (_, run) = mixed.subcommand().unwrap();
+        assert_eq!(run.count("verbose"), 4);
+        assert!(run.flag("verbose")); // flag() is true once counted
+    }
+
+    #[test]
+    fn test_count_flag_absent_is_zero() {
+        let mut app = App::new("demo");
+        app.register(Command::new("run").arg(Arg::count("verbose").short('v')));
+        let m = app.try_parse_from(["run"]).unwrap();
+        let (_, run) = m.subcommand().unwrap();
+        assert_eq!(run.count("verbose"), 0);
+        assert!(!run.flag("verbose"));
+    }
+
+    #[test]
+    fn test_repeatable_option_collects_every_form() {
+        let mut app = App::new("cc");
+        app.register(Command::new("build").arg(Arg::option("define").short('D').multiple(true)));
+        // long, long=, short-space, short-attached — all append in order.
+        let m = app
+            .try_parse_from(["build", "--define", "A", "--define=B", "-D", "C", "-DD"])
+            .unwrap();
+        let (_, build) = m.subcommand().unwrap();
+        assert_eq!(
+            build.values("define").collect::<Vec<_>>(),
+            ["A", "B", "C", "D"]
+        );
+        assert_eq!(build.value("define"), Some("A")); // value() is the first
+    }
+
+    #[test]
+    fn test_single_option_is_last_wins() {
+        let mut app = App::new("demo");
+        app.register(Command::new("run").arg(Arg::option("out").short('o')));
+        let m = app.try_parse_from(["run", "-o", "a", "-o", "b"]).unwrap();
+        let (_, run) = m.subcommand().unwrap();
+        assert_eq!(run.value("out"), Some("b"));
+        assert_eq!(run.values("out").collect::<Vec<_>>(), ["b"]);
+    }
+
+    #[test]
+    fn test_variadic_positional_slurps_remaining() {
+        let mut app = App::new("demo");
+        app.register(Command::new("rm").arg(Arg::positional("files").multiple(true)));
+        let m = app.try_parse_from(["rm", "a", "b", "c"]).unwrap();
+        assert_eq!(
+            m.subcommand()
+                .unwrap()
+                .1
+                .values("files")
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn test_fixed_then_variadic_positional() {
+        let mut app = App::new("demo");
+        app.register(
+            Command::new("cp")
+                .arg(Arg::positional("dest").required(true))
+                .arg(Arg::positional("sources").multiple(true)),
+        );
+        let m = app.try_parse_from(["cp", "target", "a", "b"]).unwrap();
+        let (_, cp) = m.subcommand().unwrap();
+        assert_eq!(cp.value("dest"), Some("target"));
+        assert_eq!(cp.values("sources").collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[test]
+    fn test_required_variadic_needs_at_least_one() {
+        let mut app = App::new("demo");
+        app.register(
+            Command::new("rm").arg(Arg::positional("files").multiple(true).required(true)),
+        );
+        let err = app.try_parse_from(["rm"]).unwrap_err();
+        assert_eq!(
+            err,
+            ParseError::MissingRequired {
+                arg: "files".into()
+            }
+        );
+
+        let ok = app.try_parse_from(["rm", "x"]).unwrap();
+        assert_eq!(
+            ok.subcommand()
+                .unwrap()
+                .1
+                .values("files")
+                .collect::<Vec<_>>(),
+            ["x"]
+        );
+    }
+
+    #[test]
+    fn test_values_empty_for_absent_and_unknown() {
+        let mut app = App::new("demo");
+        app.register(Command::new("run").arg(Arg::option("x")));
+        let m = app.try_parse_from(["run"]).unwrap();
+        let (_, run) = m.subcommand().unwrap();
+        assert_eq!(run.values("x").count(), 0);
+        assert_eq!(run.values("nope").count(), 0);
+        assert_eq!(run.value("nope"), None);
+    }
+
     fn help_demo() -> App {
         let mut app = App::new("demo")
             .version("1.0.0")
@@ -688,12 +805,15 @@ mod proptests {
     use crate::arg::Arg;
 
     fn sample_app() -> App {
-        let mut app = App::new("demo");
+        let mut app = App::new("demo").version("1.0.0");
         app.register(
             Command::new("build")
+                .aliases(["b"])
                 .arg(Arg::flag("release").short('r'))
+                .arg(Arg::count("verbose").short('v'))
                 .arg(Arg::option("jobs").short('j'))
-                .arg(Arg::positional("target"))
+                .arg(Arg::option("define").short('D').multiple(true))
+                .arg(Arg::positional("targets").multiple(true))
                 .subcommand(Command::new("clean")),
         );
         app

@@ -47,9 +47,11 @@ place:
 - **Full color** — the eight standard names plus any 24-bit color via hex or RGB,
   with graceful downgrade to 256- or 16-color terminals and clean fall-back to
   plain text on pipes, `NO_COLOR`, or the Windows console without ANSI.
-- **Command tree** — a recursive `Command` tree with arg/flag parsing and
-  **aliases**, registered into an `App` **from anywhere** (not just `main`), with
-  `.hidden()` and `.requires_auth()` flags and structured, non-panicking errors.
+- **Command tree** — a recursive `Command` tree with a full argument model
+  (flags, **counting** flags `-vvv`, options, **repeatable** options, positionals,
+  **variadic** positionals) and **aliases**, registered into an `App` **from
+  anywhere** (not just `main`), with `.hidden()` / `.requires_auth()` flags and
+  structured, non-panicking errors.
 - **Help & version** — auto-generated `--help` / `-h` (top-level and per-command)
   and `--version` / `-V`, rendered through the output layer with injectable
   header/footer.
@@ -67,7 +69,7 @@ is the `1.0` contract. See the [`ROADMAP`](./dev/ROADMAP.md).
 
 ```toml
 [dependencies]
-cli-forge = "0.5"
+cli-forge = "0.6"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -75,7 +77,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.5", default-features = false, features = ["std"] }
+cli-forge = { version = "0.6", default-features = false, features = ["std"] }
 ```
 
 <br>
@@ -183,12 +185,14 @@ let _ = app.parse();
 Commands register **from anywhere** — a command built in a non-`main` module is
 reachable and behaves identically, the limitation that made the predecessor
 unusable. Give a command extra names with `.alias("rm")` / `.aliases(["rm", "del"])`;
-aliases resolve to the canonical command. The parser handles the standard forms
-(`--long`, `--long=value`, `-s`, `-svalue`, bundled `-abc`, positionals, `--`),
-and malformed input becomes a structured `ParseError`: `parse` prints it and exits
-`2`, never panicking; `try_parse_from` returns it instead. `.hidden()` keeps a
-command invokable but out of help; `.requires_auth()` records the flag for the auth
-seam (`v0.5.0`).
+aliases resolve to the canonical command. Arguments cover flags, counting flags
+(`Arg::count`, read with `count()`), options, repeatable options and variadic
+positionals (`.multiple(true)`, read with `values()`), and positionals — parsed
+from all the standard forms (`--long`, `--long=value`, `-s`, `-svalue`, bundled
+`-abc`, `-vvv`, `--`). Malformed input becomes a structured `ParseError`: `parse`
+prints it and exits `2`, never panicking; `try_parse_from` returns it instead.
+`.hidden()` keeps a command invokable but out of help; `.requires_auth()` gates it
+behind the auth hook (feature `auth`).
 
 **Help and version come for free.** `-h` / `--help` renders styled help for the
 app or any command (with your `help_header` / `help_footer`); `-V` / `--version`
@@ -218,6 +222,7 @@ cargo run --example three_paths     # the same line, three ways
 cargo run --example colors          # named, hex, and rgb color
 cargo run --example status_report   # a realistic deploy-style status report
 cargo run --example commands -- build --release -j 8   # the command tree
+cargo run --example arguments -- build -vv -D A -D B a.rs b.rs   # every arg kind
 ```
 
 Force color when output is captured, or disable it, to see both paths:
@@ -251,10 +256,11 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v0.5.0` ships the auth seam and **declares the public surface frozen**, per the
-[`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md). The remaining
-`0.x` releases add tests, docs, and optimization only; `1.0.0` is the formal
-freeze.
+The public surface is **frozen** (feature-complete at `v0.5.0`); `v0.6.0` added the
+strictly-additive `count` / `multiple` argument conveniences the freeze permits.
+Per the [`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md), the
+remaining `0.x` releases add tests, docs, and optimization only; `1.0.0` is the
+formal freeze.
 
 <hr>
 <br>

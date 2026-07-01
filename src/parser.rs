@@ -3,10 +3,11 @@
 //! [`parse_command`] turns a slice of raw tokens into a [`Matches`] for a
 //! command, recursing into subcommands. It handles the standard forms —
 //! `--long`, `--long=value`, `--long value`, `-s`, `-s value`, `-svalue`,
-//! bundled short flags `-abc`, positionals, and the `--` end-of-options marker —
-//! and reports every malformed case as a structured [`ParseError`] rather than
-//! panicking. `-h` / `--help` and `-V` / `--version` short-circuit into the
-//! corresponding [`ParseError`] control signals, carrying rendered text.
+//! bundled short flags `-abc`, counting flags `-vvv`, repeatable options,
+//! variadic positionals, and the `--` end-of-options marker — and reports every
+//! malformed case as a structured [`ParseError`] rather than panicking. `-h` /
+//! `--help` and `-V` / `--version` short-circuit into the corresponding
+//! [`ParseError`] control signals, carrying rendered text.
 
 use crate::arg::{Arg, ArgKind};
 use crate::command::Command;
@@ -34,6 +35,27 @@ fn is_help(token: &str) -> bool {
 
 fn is_version(token: &str) -> bool {
     token == "-V" || token == "--version"
+}
+
+/// Record a value for `arg`, appending when it is `multiple` and replacing
+/// otherwise (so a single option is last-wins).
+fn record_value(matches: &mut Matches, arg: &Arg, value: String) {
+    if arg.multiple {
+        matches
+            .values
+            .entry(arg.name.clone())
+            .or_default()
+            .push(value);
+    } else {
+        let _ = matches.values.insert(arg.name.clone(), vec![value]);
+    }
+}
+
+/// Increment a counting flag's tally. Saturates rather than overflowing on
+/// pathological input.
+fn bump_count(matches: &mut Matches, name: &str) {
+    let counter = matches.counts.entry(name.to_owned()).or_insert(0);
+    *counter = counter.saturating_add(1);
 }
 
 /// Resolve and parse a top-level invocation against the app's registered
@@ -136,8 +158,11 @@ pub(crate) fn parse_command(
 
         if next_positional < positionals.len() {
             let arg = positionals[next_positional];
-            let _ = matches.values.insert(arg.name.clone(), token.clone());
-            next_positional += 1;
+            record_value(&mut matches, arg, token.clone());
+            // A variadic positional keeps absorbing the remaining bare values.
+            if !arg.multiple {
+                next_positional += 1;
+            }
             i += 1;
             continue;
         }
@@ -177,25 +202,29 @@ fn parse_long(
         })?;
 
     match arg.kind {
-        ArgKind::Flag => {
+        ArgKind::Flag | ArgKind::Count => {
             if inline.is_some() {
                 return Err(ParseError::UnexpectedArgument {
                     value: format!("--{body}"),
                 });
             }
-            let _ = matches.flags.insert(arg.name.clone());
+            if arg.kind == ArgKind::Count {
+                bump_count(matches, &arg.name);
+            } else {
+                let _ = matches.flags.insert(arg.name.clone());
+            }
             Ok(i + 1)
         }
         ArgKind::Option => match inline {
             Some(value) => {
-                let _ = matches.values.insert(arg.name.clone(), value.to_owned());
+                record_value(matches, arg, value.to_owned());
                 Ok(i + 1)
             }
             None => {
                 let value = tokens.get(i + 1).ok_or_else(|| ParseError::MissingValue {
                     option: arg.name.clone(),
                 })?;
-                let _ = matches.values.insert(arg.name.clone(), value.clone());
+                record_value(matches, arg, value.clone());
                 Ok(i + 2)
             }
         },
@@ -206,9 +235,9 @@ fn parse_long(
     }
 }
 
-/// Parse a `-short` token: a single flag, bundled flags `-abc`, or an option
-/// with an attached or following value (`-o value` / `-ovalue`). Returns the
-/// next index.
+/// Parse a `-short` token: a single flag, bundled flags/counts `-abc` / `-vvv`,
+/// or an option with an attached or following value (`-o value` / `-ovalue`).
+/// Returns the next index.
 fn parse_short(
     command: &Command,
     matches: &mut Matches,
@@ -232,16 +261,20 @@ fn parse_short(
                 let _ = matches.flags.insert(arg.name.clone());
                 idx += 1;
             }
+            ArgKind::Count => {
+                bump_count(matches, &arg.name);
+                idx += 1;
+            }
             ArgKind::Option => {
                 let rest: String = chars[idx + 1..].iter().collect();
                 if rest.is_empty() {
                     let value = tokens.get(i + 1).ok_or_else(|| ParseError::MissingValue {
                         option: arg.name.clone(),
                     })?;
-                    let _ = matches.values.insert(arg.name.clone(), value.clone());
+                    record_value(matches, arg, value.clone());
                     return Ok(i + 2);
                 }
-                let _ = matches.values.insert(arg.name.clone(), rest);
+                record_value(matches, arg, rest);
                 return Ok(i + 1);
             }
             // `find_short` never returns a positional.
@@ -260,15 +293,22 @@ fn parse_short(
 /// were supplied.
 fn apply_defaults_and_required(command: &Command, matches: &mut Matches) -> Result<(), ParseError> {
     for arg in &command.args {
-        if arg.kind == ArgKind::Flag || matches.values.contains_key(&arg.name) {
-            continue;
-        }
-        if let Some(default) = &arg.default {
-            let _ = matches.values.insert(arg.name.clone(), default.clone());
-        } else if arg.required {
-            return Err(ParseError::MissingRequired {
-                arg: arg.name.clone(),
-            });
+        match arg.kind {
+            ArgKind::Flag | ArgKind::Count => continue,
+            ArgKind::Option | ArgKind::Positional => {
+                if matches.values.contains_key(&arg.name) {
+                    continue;
+                }
+                if let Some(default) = &arg.default {
+                    let _ = matches
+                        .values
+                        .insert(arg.name.clone(), vec![default.clone()]);
+                } else if arg.required {
+                    return Err(ParseError::MissingRequired {
+                        arg: arg.name.clone(),
+                    });
+                }
+            }
         }
     }
     Ok(())

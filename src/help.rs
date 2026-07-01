@@ -191,16 +191,23 @@ fn help_text(arg: &Arg) -> &str {
     arg.help.as_deref().unwrap_or("")
 }
 
-/// A positional's usage slot: `<name>` when required, `[name]` otherwise.
+/// A positional's usage slot: `<name>` when required, `[name]` otherwise, with a
+/// trailing `...` for a variadic (`multiple`) positional.
 fn positional_slot(arg: &Arg) -> String {
-    if arg.required && arg.default.is_none() {
+    let slot = if arg.required && arg.default.is_none() {
         format!("<{}>", arg.name)
     } else {
         format!("[{}]", arg.name)
+    };
+    if arg.multiple {
+        format!("{slot}...")
+    } else {
+        slot
     }
 }
 
-/// A flag/option's left column, e.g. `-o, --output <OUTPUT>` or `    --long`.
+/// A flag/count/option's left column, e.g. `-o, --output <OUTPUT>`,
+/// `-D, --define <DEFINE>...` (repeatable), or `-v, --verbose` (flag/count).
 fn option_signature(arg: &Arg) -> String {
     let mut left = match arg.short {
         Some(c) => format!("-{c}, "),
@@ -211,6 +218,9 @@ fn option_signature(arg: &Arg) -> String {
     }
     if arg.kind == ArgKind::Option {
         left.push_str(&format!(" <{}>", arg.name.to_uppercase()));
+        if arg.multiple {
+            left.push_str("...");
+        }
     }
     left
 }

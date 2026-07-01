@@ -72,6 +72,18 @@ Exit criteria:
 
 ---
 
+## v0.6.0 — Argument conveniences (DONE)
+
+Strictly-additive polish within the frozen surface — the small, common argument
+kinds a base CLI is expected to have, added without changing anything existing.
+
+- [x] Counting flags: `Arg::count` + `Matches::count` (`-vvv` verbosity).
+- [x] Multiple values: `Arg::multiple` (repeatable options + variadic positionals)
+      + `Matches::values`.
+- [x] Comprehensive edge-case tests on both feature sets; docs and an example.
+
+---
+
 ## v1.0.0 — API freeze
 
 The parse + output + registration + help surface is stable and frozen until 2.0.

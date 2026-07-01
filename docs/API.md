@@ -18,11 +18,12 @@
 
 > Complete reference for every public item in `cli-forge`, with examples.
 >
-> **Status: the public surface is FROZEN as of v0.5.0.** The output layer, the
-> command layer, the help engine, and the auth seam are all implemented. The
-> remaining 0.x releases add tests, docs, and internal optimization only — the
-> surface documented here becomes the 1.0 contract. See
-> [Stability](#stability) and [`dev/ROADMAP.md`](../dev/ROADMAP.md).
+> **Status: the public surface is FROZEN (feature-complete as of v0.5.0).** The
+> output layer, the command layer, the help engine, and the auth seam are all
+> implemented; v0.6.0 added the strictly-additive `count` / `multiple` argument
+> conveniences the freeze permits. Nothing existing changes or is removed before
+> the 1.0 contract. See [Stability](#stability) and
+> [`dev/ROADMAP.md`](../dev/ROADMAP.md).
 
 ## Table of Contents
 
@@ -69,7 +70,7 @@ a consumer-supplied hook.
 
 ```toml
 [dependencies]
-cli-forge = "0.5"
+cli-forge = "0.6"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -77,14 +78,14 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.5", default-features = false, features = ["std"] }
+cli-forge = { version = "0.6", default-features = false, features = ["std"] }
 ```
 
 For the auth seam, enable the `auth` feature:
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.5", features = ["auth"] }
+cli-forge = { version = "0.6", features = ["auth"] }
 ```
 
 ---
@@ -548,21 +549,23 @@ let _ = app.try_parse_from(["remote", "add", "https://example.com"]).unwrap();
 
 <h2 id="arguments">Arguments: <code>Arg</code></h2>
 
-An argument a command accepts. Three kinds, each with a constructor; the builder
+An argument a command accepts. Four kinds, each with a constructor; the builder
 methods refine and chain.
 
-| Constructor | Form | Example input |
-|-------------|------|---------------|
-| `Arg::flag(name)` | boolean switch | `--verbose`, `-v` |
-| `Arg::option(name)` | named value | `--output f`, `--output=f`, `-o f`, `-of` |
-| `Arg::positional(name)` | value by position | `path/to/file` |
+| Constructor | Form | Example input | Read with |
+|-------------|------|---------------|-----------|
+| `Arg::flag(name)` | boolean switch | `--verbose`, `-v` | `flag` |
+| `Arg::count(name)` | repeatable switch, counted | `-v`, `-vv`, `-vvv` | `count` |
+| `Arg::option(name)` | named value | `--output f`, `--output=f`, `-o f`, `-of` | `value` / `values` |
+| `Arg::positional(name)` | value by position | `path/to/file` | `value` / `values` |
 
 | Method | Description |
 |--------|-------------|
-| `.short(c)` | One-letter form `-c` (flag/option). |
+| `.short(c)` | One-letter form `-c` (flag/count/option). |
 | `.long(s)` | Override the `--long` form (defaults to the name). |
-| `.help(s)` | Help text (surfaced by the help engine, v0.4.0). |
-| `.required(b)` | Fail with `MissingRequired` if absent and no default. |
+| `.help(s)` | Help text, shown in generated help. |
+| `.required(b)` | Fail with `MissingRequired` if absent and no default (options/positionals). |
+| `.multiple(b)` | Collect every occurrence into a list. Repeatable option, or variadic positional (put it last). Read with `values`. |
 | `.default(s)` | Value used when an option/positional is omitted. |
 
 The `name` is the key used to read the value back out of a [`Matches`](#matches-section).
@@ -574,21 +577,44 @@ let mut app = App::new("demo");
 app.register(
     Command::new("build")
         .arg(Arg::flag("release").short('r'))
+        .arg(Arg::count("verbose").short('v'))
         .arg(Arg::option("jobs").short('j').default("1"))
         .arg(Arg::positional("target").default("all")),
 );
 
-let m = app.try_parse_from(["build", "-r", "-j", "8", "lib"]).unwrap();
+let m = app.try_parse_from(["build", "-r", "-vv", "-j", "8", "lib"]).unwrap();
 let (_, build) = m.subcommand().unwrap();
 assert!(build.flag("release"));
+assert_eq!(build.count("verbose"), 2);
 assert_eq!(build.value("jobs"), Some("8"));
 assert_eq!(build.value("target"), Some("lib"));
 ```
 
+Repeatable options and a variadic positional — the "give me N of these" pattern:
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("cc");
+app.register(
+    Command::new("build")
+        .arg(Arg::option("define").short('D').multiple(true))  // -D A -D B
+        .arg(Arg::positional("sources").multiple(true).required(true)), // a b c
+);
+
+let m = app.try_parse_from(["build", "-D", "A", "-D", "B", "x.c", "y.c"]).unwrap();
+let (_, build) = m.subcommand().unwrap();
+assert_eq!(build.values("define").collect::<Vec<_>>(), ["A", "B"]);
+assert_eq!(build.values("sources").collect::<Vec<_>>(), ["x.c", "y.c"]);
+```
+
 **Parsing forms handled:** `--long`, `--long value`, `--long=value`, `-s`,
-`-s value`, `-svalue`, bundled short flags `-abc`, positionals, and the `--`
-end-of-options marker (everything after it is positional). A token like `-5` is
-read as a short flag; put it after `--` to pass a negative-number positional.
+`-s value`, `-svalue`, bundled short flags `-abc`, counting flags `-vvv`,
+repeatable options, variadic positionals, and the `--` end-of-options marker
+(everything after it is positional). A token like `-5` is read as a short flag;
+put it after `--` to pass a negative-number positional. A variadic positional
+must be the last positional (it absorbs the rest); a single option given twice is
+last-wins unless marked `multiple`.
 
 ---
 
@@ -598,8 +624,10 @@ What the parser produces for one command level, and what a `run` handler receive
 
 | Method | Description |
 |--------|-------------|
-| `.flag(name) -> bool` | Whether the flag was set (`false` for unknown names). |
-| `.value(name) -> Option<&str>` | An option/positional value, or its default; `None` if absent and undefaulted. |
+| `.flag(name) -> bool` | Whether the flag was set (`false` for unknown names; `true` for a count arg once counted). |
+| `.count(name) -> usize` | How many times a [count](#arguments) flag was given (`0` if absent). |
+| `.value(name) -> Option<&str>` | An option/positional value, or its default; the first value for a `multiple` arg; `None` if absent and undefaulted. |
+| `.values(name) -> impl Iterator<Item = &str>` | Every value collected for a `multiple` option or variadic positional, in order; empty if absent. |
 | `.subcommand() -> Option<(&str, &Matches)>` | The invoked subcommand's name and its own matches. |
 
 ```rust
@@ -609,14 +637,20 @@ let mut app = App::new("git-like");
 app.register(
     Command::new("commit")
         .arg(Arg::flag("amend"))
-        .arg(Arg::option("message").short('m')),
+        .arg(Arg::count("verbose").short('v'))
+        .arg(Arg::option("message").short('m'))
+        .arg(Arg::positional("paths").multiple(true)),
 );
 
-let top = app.try_parse_from(["commit", "--amend", "-m", "fix"]).unwrap();
+let top = app
+    .try_parse_from(["commit", "--amend", "-vv", "-m", "fix", "a.rs", "b.rs"])
+    .unwrap();
 let (name, commit) = top.subcommand().unwrap();
 assert_eq!(name, "commit");
 assert!(commit.flag("amend"));
+assert_eq!(commit.count("verbose"), 2);
 assert_eq!(commit.value("message"), Some("fix"));
+assert_eq!(commit.values("paths").collect::<Vec<_>>(), ["a.rs", "b.rs"]);
 ```
 
 ---
@@ -718,10 +752,11 @@ targets alone. The `auth` feature adds no dependencies.
 
 <h2 id="stability">Stability</h2>
 
-The public surface documented above is **frozen as of v0.5.0**. It is
-feature-complete: the remaining 0.x releases add tests, documentation, and
-internal optimization, plus strictly-additive conveniences — they do not change or
-remove existing API. This surface becomes the 1.0 contract, after which it follows
+The public surface is **frozen** (feature-complete as of v0.5.0): the remaining
+0.x releases add tests, documentation, and internal optimization, plus
+strictly-additive conveniences — they do not change or remove existing API. v0.6.0
+was one such additive step (`Arg::count` / `Arg::multiple`, `Matches::count` /
+`Matches::values`). This surface becomes the 1.0 contract, after which it follows
 SemVer strictly (a breaking change requires a MAJOR bump).
 
 Frozen public items: `out`, `err`, `parse`, `style` / `Style`, `define_tag` /

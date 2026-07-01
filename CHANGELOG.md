@@ -21,6 +21,31 @@
 
 ---
 
+## [0.6.0] - 2026-07-01
+
+Two small, common argument conveniences — counting flags and multiple values —
+added within the frozen surface (strictly additive; nothing existing changed).
+
+### Added
+
+- `Arg::count(name)`: a repeatable flag whose occurrences are tallied
+  (`-v`/`-vv`/`-vvv`, `-v -v -v`, `--verbose --verbose`). Read with
+  `Matches::count(name) -> usize`.
+- `Arg::multiple(bool)`: collect every occurrence of an option into a list, or
+  make a positional variadic (absorbing the remaining bare values). Read with
+  `Matches::values(name) -> impl Iterator<Item = &str>`.
+- `Matches::count` and `Matches::values` accessors. `Matches::flag` now also
+  reports `true` for a counting flag once its count reaches one.
+- `examples/arguments.rs`: every argument kind in one command.
+
+### Changed
+
+- Counts saturate rather than overflowing on pathological repeated input.
+- `docs/API.md` documents the two new argument kinds with parameter tables and
+  examples; the Stability section notes the additive step.
+
+---
+
 ## [0.5.0] - 2026-07-01
 
 The auth seam, and the public surface declared frozen ahead of 1.0.
@@ -199,7 +224,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jamesgober/cli-forge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/cli-forge/compare/v0.2.5...v0.3.0
