@@ -18,12 +18,10 @@
 
 > Complete reference for every public item in `cli-forge`, with examples.
 >
-> **Status: the public surface is FROZEN (feature-complete as of v0.5.0).** The
-> output layer, the command layer, the help engine, and the auth seam are all
-> implemented; v0.6.0 added the strictly-additive `count` / `multiple` argument
-> conveniences the freeze permits. Nothing existing changes or is removed before
-> the 1.0 contract. See [Stability](#stability) and
-> [`dev/ROADMAP.md`](../dev/ROADMAP.md).
+> **Status: STABLE — v1.0.0.** The output layer, the command layer, the help
+> engine, and the auth seam are all implemented, and the public surface documented
+> here is guaranteed under Semantic Versioning: no breaking change before `2.0`.
+> See the [Stability](#stability) section for the SemVer promise.
 
 ## Table of Contents
 
@@ -57,10 +55,11 @@ It owns parsing, output, command registration, and help. It does NOT own tables,
 progress bars, gradients, layouts, or shells — those are sibling crates in the
 cli collection that build on this crate's output API.
 
-As of v0.5.0 the framework is feature-complete: a near-direct plain path
+As of v1.0.0 the framework is stable and feature-complete: a near-direct plain path
 (`out`/`err`) and three ways to add color that all render to identical bytes, over
 one cross-platform terminal backend; a recursive command tree with runtime
-registration, aliases, arg/flag parsing, and structured non-panicking errors;
+registration, aliases, arg/flag parsing (flags, counts, options, positionals, with
+repeatable/variadic collection), and structured non-panicking errors;
 auto-generated `--help` / `--version`; and an auth seam that gates commands behind
 a consumer-supplied hook.
 
@@ -70,7 +69,7 @@ a consumer-supplied hook.
 
 ```toml
 [dependencies]
-cli-forge = "0.6"
+cli-forge = "1.0"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -78,14 +77,14 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.6", default-features = false, features = ["std"] }
+cli-forge = { version = "1.0", default-features = false, features = ["std"] }
 ```
 
 For the auth seam, enable the `auth` feature:
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.6", features = ["auth"] }
+cli-forge = { version = "1.0", features = ["auth"] }
 ```
 
 ---
@@ -752,15 +751,23 @@ targets alone. The `auth` feature adds no dependencies.
 
 <h2 id="stability">Stability</h2>
 
-The public surface is **frozen** (feature-complete as of v0.5.0): the remaining
-0.x releases add tests, documentation, and internal optimization, plus
-strictly-additive conveniences — they do not change or remove existing API. v0.6.0
-was one such additive step (`Arg::count` / `Arg::multiple`, `Matches::count` /
-`Matches::values`). This surface becomes the 1.0 contract, after which it follows
-SemVer strictly (a breaking change requires a MAJOR bump).
+cli-forge **1.0** is a stable release. The public surface below is frozen under
+[Semantic Versioning](https://semver.org/):
 
-Frozen public items: `out`, `err`, `parse`, `style` / `Style`, `define_tag` /
-`tag` / `Tag`, `App`, `Command`, `Arg`, `Matches`, `ParseError`, and — behind the
+- **No breaking change before 2.0.** Every public item's signature and documented
+  behavior — including the `auth` seam and the feature flags — is guaranteed. A
+  breaking change requires a MAJOR bump.
+- **Additions are minor.** New public API arrives only in `1.x` (minor) releases
+  and is strictly additive; existing code keeps compiling and behaving the same.
+- **Fixes and optimization are patch.** Bug fixes and internal performance work
+  ship as `1.0.x` (patch) releases with no API change.
+- **MSRV policy.** The minimum supported Rust version (1.85) will only rise in a
+  minor release, never a patch.
+- **Feature flags are additive.** Enabling `color` or `auth` never removes or
+  changes existing behavior; the default build stays fully functional.
+
+The frozen public surface: `out`, `err`, `parse`, `style` / `Style`, `define_tag`
+/ `tag` / `Tag`, `App`, `Command`, `Arg`, `Matches`, `ParseError`, and — behind the
 `auth` feature — `App::auth` / `AuthRequest`.
 
 ---

@@ -26,7 +26,7 @@
         <strong>MSRV is 1.85+</strong> (Rust 2024 edition).
     </p>
     <blockquote>
-        <strong>Status: pre-1.0, in active development.</strong> The public API is being designed across the 0.x series and frozen at <code>1.0.0</code>. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
+        <strong>Status: 1.0 &mdash; stable.</strong> The public API is frozen under <a href="https://semver.org/">Semantic Versioning</a>: no breaking changes before <code>2.0</code>. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
     </blockquote>
 </div>
 
@@ -35,9 +35,9 @@
 
 ## What's here
 
-As of `v0.5.0` the framework is **feature-complete and the public surface is
-frozen** — the output layer, command layer, help engine, and auth seam are all in
-place:
+`v1.0.0` is the **stable API freeze**. The framework is feature-complete — the
+output layer, command layer, help engine, and auth seam are all in place, and the
+public surface is guaranteed under SemVer:
 
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
   string literal. The hot path stays cheap.
@@ -59,8 +59,9 @@ place:
   authorization hook. cli-forge holds the seam; the login state lives in your code.
   Fails closed, and hides unauthorized commands from help.
 
-The remaining `0.x` releases are docs, tests, and optimization only — this surface
-is the `1.0` contract. See the [`ROADMAP`](./dev/ROADMAP.md).
+Everything above is stable. Future `1.x` releases add only strictly-additive API,
+bug fixes, and internal optimization; nothing existing changes before `2.0`. See
+the [`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>
@@ -69,7 +70,7 @@ is the `1.0` contract. See the [`ROADMAP`](./dev/ROADMAP.md).
 
 ```toml
 [dependencies]
-cli-forge = "0.6"
+cli-forge = "1.0"
 ```
 
 Color is on by default. For a build that never emits escape sequences (the API
@@ -77,7 +78,7 @@ stays complete; every styled value renders as its plain text):
 
 ```toml
 [dependencies]
-cli-forge = { version = "0.6", default-features = false, features = ["std"] }
+cli-forge = { version = "1.0", default-features = false, features = ["std"] }
 ```
 
 <br>
@@ -256,11 +257,10 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-The public surface is **frozen** (feature-complete at `v0.5.0`); `v0.6.0` added the
-strictly-additive `count` / `multiple` argument conveniences the freeze permits.
-Per the [`ROADMAP`](./dev/ROADMAP.md) and [`docs/API.md`](./docs/API.md), the
-remaining `0.x` releases add tests, docs, and optimization only; `1.0.0` is the
-formal freeze.
+`v1.0.0` is the **stable API freeze**: the public surface is guaranteed under
+Semantic Versioning — no breaking changes before `2.0`. `1.x` releases add only
+strictly-additive API, fixes, and internal optimization. See the SemVer promise in
+[`docs/API.md`](./docs/API.md#stability) and the [`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>

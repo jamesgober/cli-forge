@@ -6,9 +6,11 @@
 //! injectable [`App::help_header`](crate::App::help_header) /
 //! [`App::help_footer`](crate::App::help_footer) wrap every page.
 //!
-//! Commands marked [`hidden`](crate::Command::hidden) or
-//! [`requires_auth`](crate::Command::requires_auth) are omitted from the listings
-//! (auth-gated commands surface once the auth seam lands in v0.5.0).
+//! Commands marked [`hidden`](crate::Command::hidden) are always omitted from the
+//! listings. With the `auth` feature, a
+//! [`requires_auth`](crate::Command::requires_auth) command is also omitted unless
+//! the auth hook authorizes it; without the feature the flag is inert and the
+//! command is listed normally.
 
 use crate::arg::{Arg, ArgKind};
 use crate::command::Command;

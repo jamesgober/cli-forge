@@ -69,11 +69,12 @@
 //!
 //! ## Feature flags
 //!
-//! - **`std`** *(default)* — terminal detection and the stdout/stderr writers.
+//! - **`std`** *(default)* — terminal detection, the stdout/stderr writers, and
+//!   the command layer.
 //! - **`color`** *(default)* — ANSI styled output. Disable for plain output; the
 //!   API stays complete and every styled value renders as its plain text.
-//! - **`auth`** — reserved for the `requires_auth` command flag (v0.5.0); no
-//!   effect yet.
+//! - **`auth`** — the authorization seam: `App::auth`, `AuthRequest`, and
+//!   enforcement of [`Command::requires_auth`].
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]

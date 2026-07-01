@@ -21,6 +21,27 @@
 
 ---
 
+## [1.0.0] - 2026-07-01
+
+The stable API freeze. No new public API — the surface built across the 0.x series
+is now guaranteed under Semantic Versioning: no breaking change before 2.0.
+
+### Added
+
+- Command-parse benchmarks (`parse_simple`, `parse_rich`) rounding out the
+  benchmark suite alongside the output-layer benches (internal; not public API).
+
+### Changed
+
+- Public surface **declared stable**. `docs/API.md` records the SemVer promise
+  (breaking changes require a MAJOR bump; additions are minor; fixes/optimization
+  are patch; the 1.85 MSRV rises only in minors).
+- README and API.md status updated from "pre-1.0 / frozen" to "1.0 — stable".
+- Doc comments that referenced upcoming milestones (`reserved for v0.5.0`, "surface
+  once the auth seam lands") corrected to describe the shipped behavior.
+
+---
+
 ## [0.6.0] - 2026-07-01
 
 Two small, common argument conveniences — counting flags and multiple values —
@@ -224,7 +245,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jamesgober/cli-forge/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/jamesgober/cli-forge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jamesgober/cli-forge/compare/v0.3.0...v0.4.0

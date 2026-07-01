@@ -68,5 +68,47 @@ fn output_benches(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, output_benches);
+/// Command-layer benchmarks: resolving and parsing an invocation (the app is
+/// built once; only `try_parse_from` — parse plus dispatch of an empty handler —
+/// is measured).
+fn parse_benches(c: &mut Criterion) {
+    use cli_forge::{App, Arg, Command};
+
+    let mut app = App::new("bench").version("1.0.0");
+    app.register(
+        Command::new("build")
+            .arg(Arg::flag("release").short('r'))
+            .arg(Arg::count("verbose").short('v'))
+            .arg(Arg::option("jobs").short('j').default("1"))
+            .arg(Arg::option("define").short('D').multiple(true))
+            .arg(Arg::positional("targets").multiple(true))
+            .run(|_| {}),
+    );
+
+    // A minimal invocation: one command, one flag.
+    c.bench_function("parse_simple", |b| {
+        b.iter(|| black_box(app.try_parse_from(black_box(["build", "-r"]))));
+    });
+
+    // A realistic invocation exercising counts, repeated options, and variadics.
+    c.bench_function("parse_rich", |b| {
+        b.iter(|| {
+            black_box(app.try_parse_from(black_box([
+                "build",
+                "-vvv",
+                "--release",
+                "-D",
+                "A",
+                "-D",
+                "B",
+                "-j",
+                "8",
+                "a.rs",
+                "b.rs",
+            ])))
+        });
+    });
+}
+
+criterion_group!(benches, output_benches, parse_benches);
 criterion_main!(benches);

@@ -84,7 +84,7 @@ kinds a base CLI is expected to have, added without changing anything existing.
 
 ---
 
-## v1.0.0 — API freeze
+## v1.0.0 — API freeze (DONE)
 
 The parse + output + registration + help surface is stable and frozen until 2.0.
 No new public API, only documentation, tests, and internal optimisation.
@@ -92,5 +92,5 @@ Sibling crates (`cli-table`, `cli-progress`, gradients, layouts, shell) build on
 this frozen base.
 
 Exit criteria:
-- [ ] `docs/API.md` marked stable; SemVer promise recorded.
-- [ ] Full test + benchmark suite green on all three platforms.
+- [x] `docs/API.md` marked stable; SemVer promise recorded. (See the Stability section.)
+- [x] Full test + benchmark suite green on all three platforms. (Windows + Linux verified directly; macOS via the CI matrix on the shared non-Windows path. Output + command-parse benchmarks green.)
