@@ -393,6 +393,22 @@ sibling crates that build on these seams:
 
 <br>
 
+## Documentation
+
+| | |
+|---|---|
+| **[Guide](./docs/GUIDE.md)** | Start here. Install it, write a working program, understand the shape. ~15 minutes. |
+| **[Output & Styling](./docs/OUTPUT.md)** | Colours, themes, markers, aligned columns, markup, measuring text. |
+| **[Commands & Arguments](./docs/COMMANDS.md)** | Commands, the argument model, validation, errors, help, testing. |
+| **[Recipes](./docs/RECIPES.md)** | The answer to a specific task, without the explanation. |
+| **[API](./docs/API.md)** | The surface map and the exact stability promise. |
+| **[docs.rs](https://docs.rs/cli-forge)** | Signatures and a runnable example for every item. |
+
+The full index is at [`docs/`](./docs/README.md). Every code block in those
+guides is compiled and run by `cargo test`, so none of it can go stale.
+
+<br>
+
 ## Examples
 
 ```bash

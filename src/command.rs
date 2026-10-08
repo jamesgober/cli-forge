@@ -408,6 +408,27 @@ impl Command {
     /// this way exits `1`; use [`run_status`](Command::run_status) when the exact
     /// status matters.
     ///
+    /// # A handler that only diverges
+    ///
+    /// `run(|_| todo!())` does not compile, and neither does any closure whose
+    /// body only diverges — a bare `panic!`, `unreachable!`, or
+    /// `unimplemented!`. Such a closure returns the never type, and Rust picks
+    /// the [`Outcome`] implementation before it would coerce that to `()`.
+    /// Adding a semicolon does not help, because a block that unconditionally
+    /// diverges still has that type. Annotate the return instead:
+    ///
+    /// ```
+    /// use cli_forge::Command;
+    ///
+    /// // Command::new("x").run(|_| todo!());                  // will not compile
+    /// let scaffold = Command::new("x").run(|_| -> () { todo!() });
+    /// let later = Command::new("y").run(|_| -> Result<(), String> { todo!() });
+    /// # let _ = (scaffold, later);
+    /// ```
+    ///
+    /// This is a limitation of trait selection on a diverging closure rather
+    /// than a choice; `impl Outcome for !` would fix it and is not stable.
+    ///
     /// # Examples
     ///
     /// ```

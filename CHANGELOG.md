@@ -147,6 +147,12 @@ a second description of the same CLI.
 backgrounds, `<link=…>` hyperlinks, and `<<` for a literal `<`. `markup_at` for
 an explicit depth.
 
+**Prose documentation**, indexed at [`docs/`](./docs/README.md): a
+[Guide](./docs/GUIDE.md), [Output & Styling](./docs/OUTPUT.md),
+[Commands & Arguments](./docs/COMMANDS.md), and [Recipes](./docs/RECIPES.md).
+Every code block in them — and in this README — is compiled and run by
+`cargo test`, so none of it can go stale.
+
 ### Changed
 
 - **`--no-default-features` is now a real `no_std` build** of the styling core

@@ -209,6 +209,29 @@ mod registry;
 #[cfg(all(test, feature = "color"))]
 mod crosspath_tests;
 
+/// The prose documentation, compiled as doctests.
+///
+/// Documentation that is never executed rots, and a guide whose first example
+/// does not compile is worse than no guide. Including these files here means
+/// every Rust block in them is built and run by `cargo test`, so an API change
+/// that invalidates one is a failing test rather than a bad first impression.
+///
+/// `cfg(doctest)` means the module exists only while doctests are being
+/// collected, so none of this appears in the rendered documentation.
+#[cfg(all(doctest, feature = "std"))]
+mod prose {
+    #[doc = include_str!("../docs/README.md")]
+    mod index {}
+    #[doc = include_str!("../docs/GUIDE.md")]
+    mod guide {}
+    #[doc = include_str!("../docs/OUTPUT.md")]
+    mod output {}
+    #[doc = include_str!("../docs/COMMANDS.md")]
+    mod commands {}
+    #[doc = include_str!("../docs/RECIPES.md")]
+    mod recipes {}
+}
+
 pub use crate::color::Color;
 pub use crate::style::{Painted, Style, style};
 pub use crate::tags::{markup, markup_at};

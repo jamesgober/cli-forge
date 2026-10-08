@@ -77,6 +77,19 @@ jobs:
       - name: Test
         run: cargo test ${{ matrix.features }}
 
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      # Every relative link and heading anchor across the README, the guides,
+      # the changelog and the release notes.
+      - name: Links
+        run: python dev/check-doc-links.py
+
   benchmarks:
     name: Benchmarks compile
     runs-on: ubuntu-latest

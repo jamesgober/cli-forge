@@ -78,9 +78,17 @@ print helper has no way to report failure that the caller could act on.
 | `Style::new()` | An empty `Style`, for reuse. |
 | `Painted<T>` | A value with a `Style` applied, ready to print. |
 
-**Colours** — `black` … `white`, `bright_black` … `bright_white`, `fg(Color)`,
-`hex`, `rgb`, `ansi`; and the background forms `on_black` … `on_white`,
-`bg(Color)`, `on_hex`, `on_rgb`, `on_ansi`.
+**Colours** — foreground: `black`, `red`, `green`, `yellow`, `blue`, `magenta`,
+`cyan`, `white`, `bright_black`, `bright_red`, `bright_green`, `bright_yellow`,
+`bright_blue`, `bright_magenta`, `bright_cyan`, `bright_white`, plus `fg(Color)`,
+`hex`, `rgb`, `ansi`.
+
+Background: `on_black`, `on_red`, `on_green`, `on_yellow`, `on_blue`,
+`on_magenta`, `on_cyan`, `on_white`, plus `bg(Color)`, `on_hex`, `on_rgb`,
+`on_ansi`.
+
+(There are no `on_bright_*` methods; use `bg(Color::BrightRed)`, which is the
+same thing without sixteen more names.)
 
 **Attributes** — `bold`, `dim`, `italic`, `underline`, `blink`, `reverse`,
 `hidden`, `strike`.
@@ -151,8 +159,8 @@ that let untrusted text take over a terminal.
 
 ### Terminal
 
-`ColorLevel` (`None` < `Ansi16` < `Ansi256` < `TrueColor`), `Stream`
-(`Stdout`, `Stderr`), `ColorChoice` (`Auto`, `Always`, `Never`).
+`ColorLevel` (`None` < `Ansi16` < `Ansi256` < `TrueColor`, plus `is_none()`),
+`Stream` (`Stdout`, `Stderr`), `ColorChoice` (`Auto`, `Always`, `Never`).
 
 `terminal::level`, `set_color_choice`, `color_choice`, `set_level`, `clear_level`,
 `invalidate`, `size`, `width_or`, `supports_unicode`.
