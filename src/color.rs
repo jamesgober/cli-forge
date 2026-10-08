@@ -260,8 +260,8 @@ impl Color {
         match level {
             ColorLevel::TrueColor | ColorLevel::Ansi256 => {
                 separator(w, first)?;
-                let selector = if background { 48 } else { 38 };
-                write!(w, "{selector};5;{index}")
+                w.write_str(if background { "48;5;" } else { "38;5;" })?;
+                write_u8(w, index)
             }
             ColorLevel::Ansi16 => {
                 let (r, g, b) = palette_rgb(index);
@@ -284,15 +284,20 @@ impl Color {
         g: u8,
         b: u8,
     ) -> fmt::Result {
-        let selector = if background { 48 } else { 38 };
         match level {
             ColorLevel::TrueColor => {
                 separator(w, first)?;
-                write!(w, "{selector};2;{r};{g};{b}")
+                w.write_str(if background { "48;2;" } else { "38;2;" })?;
+                write_u8(w, r)?;
+                w.write_char(';')?;
+                write_u8(w, g)?;
+                w.write_char(';')?;
+                write_u8(w, b)
             }
             ColorLevel::Ansi256 => {
                 separator(w, first)?;
-                write!(w, "{selector};5;{}", rgb_to_256(r, g, b))
+                w.write_str(if background { "48;5;" } else { "38;5;" })?;
+                write_u8(w, rgb_to_256(r, g, b))
             }
             ColorLevel::Ansi16 => write_basic(w, first, nearest_basic(r, g, b), background),
             ColorLevel::None => Ok(()),
@@ -310,19 +315,40 @@ fn separator<W: Write>(w: &mut W, first: &mut bool) -> fmt::Result {
     }
 }
 
-/// Write one of the sixteen standard colours by palette slot: `30..=37` and
-/// `90..=97` for foregrounds, `40..=47` and `100..=107` for backgrounds.
+/// The SGR parameter for each of the sixteen palette slots, as text.
+///
+/// A table rather than arithmetic plus `write!`: the set is fixed and tiny, and
+/// formatting an integer costs more than the whole rest of writing a styled run.
+const FG_CODES: [&str; 16] = [
+    "30", "31", "32", "33", "34", "35", "36", "37", "90", "91", "92", "93", "94", "95", "96", "97",
+];
+
+/// The background counterparts of [`FG_CODES`].
+const BG_CODES: [&str; 16] = [
+    "40", "41", "42", "43", "44", "45", "46", "47", "100", "101", "102", "103", "104", "105",
+    "106", "107",
+];
+
+/// Write one of the sixteen standard colours by palette slot.
 fn write_basic<W: Write>(w: &mut W, first: &mut bool, slot: u8, background: bool) -> fmt::Result {
     separator(w, first)?;
-    // The bright slots (8..=15) use the 90/100 ranges, so their base is offset
-    // by eight to cancel the slot number already carrying that eight.
-    let base: u16 = match (slot >= 8, background) {
-        (false, false) => 30,
-        (false, true) => 40,
-        (true, false) => 82,
-        (true, true) => 92,
-    };
-    write!(w, "{}", base + u16::from(slot))
+    let table = if background { &BG_CODES } else { &FG_CODES };
+    // Every caller derives `slot` from a 16-entry palette, so this cannot be out
+    // of range; falling back to white rather than panicking keeps the promise
+    // that rendering never brings a program down.
+    w.write_str(table.get(slot as usize).copied().unwrap_or("37"))
+}
+
+/// Write a `0..=255` value in decimal without going through the formatting
+/// machinery, which dominates the cost of emitting an escape sequence.
+fn write_u8<W: Write>(w: &mut W, value: u8) -> fmt::Result {
+    if value >= 100 {
+        w.write_char(char::from(b'0' + value / 100))?;
+    }
+    if value >= 10 {
+        w.write_char(char::from(b'0' + (value / 10) % 10))?;
+    }
+    w.write_char(char::from(b'0' + value % 10))
 }
 
 /// Match a colour name, ignoring case and any `_`, `-`, or space separators, so
@@ -545,7 +571,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::shim::String;
+    use crate::shim::{String, ToString};
 
     /// Render a colour's SGR parameters in isolation.
     fn sgr(color: Color, level: ColorLevel, background: bool) -> String {
@@ -693,6 +719,35 @@ mod tests {
         assert_eq!(Color::Ansi(15).to_rgb(), (255, 255, 255));
         assert_eq!(Color::Ansi(16).to_rgb(), (0, 0, 0));
         assert_eq!(Color::Ansi(255).to_rgb(), (238, 238, 238));
+    }
+
+    #[test]
+    fn test_code_tables_match_the_sgr_ranges() {
+        // The tables replaced arithmetic, so a typo would now be a silently
+        // wrong colour rather than a compile error.
+        for slot in 0..16u8 {
+            let expected_fg = if slot < 8 { 30 + slot } else { 90 + slot - 8 };
+            let expected_bg = if slot < 8 { 40 + slot } else { 100 + slot - 8 };
+            assert_eq!(
+                FG_CODES[slot as usize],
+                expected_fg.to_string(),
+                "fg {slot}"
+            );
+            assert_eq!(
+                BG_CODES[slot as usize],
+                expected_bg.to_string(),
+                "bg {slot}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_write_u8_matches_decimal_formatting() {
+        for value in 0..=255u8 {
+            let mut written = String::new();
+            write_u8(&mut written, value).unwrap();
+            assert_eq!(written, value.to_string(), "{value}");
+        }
     }
 
     #[test]

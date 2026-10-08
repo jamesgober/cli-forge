@@ -49,15 +49,17 @@ use crate::text::{self, Align};
 ///
 /// Fixing the order is what lets two callers that expressed the same intent
 /// differently produce the same bytes.
-const ATTRIBUTES: [(u8, u8); 8] = [
-    (BOLD, 1),
-    (DIM, 2),
-    (ITALIC, 3),
-    (UNDERLINE, 4),
-    (BLINK, 5),
-    (REVERSE, 7),
-    (HIDDEN, 8),
-    (STRIKE, 9),
+/// Held as text rather than as a number, so emitting one is a string copy
+/// instead of a trip through the integer formatter.
+const ATTRIBUTES: [(u8, &str); 8] = [
+    (BOLD, "1"),
+    (DIM, "2"),
+    (ITALIC, "3"),
+    (UNDERLINE, "4"),
+    (BLINK, "5"),
+    (REVERSE, "7"),
+    (HIDDEN, "8"),
+    (STRIKE, "9"),
 ];
 
 /// The attribute bits, one per renderable attribute.
@@ -156,7 +158,7 @@ fn open<W: Write>(w: &mut W, attrs: StyleAttrs, level: ColorLevel) -> fmt::Resul
             if !first {
                 w.write_char(';')?;
             }
-            write!(w, "{parameter}")?;
+            w.write_str(parameter)?;
             first = false;
         }
     }
@@ -1114,6 +1116,15 @@ mod tests {
         }
         // All eight bits of the flag byte are accounted for.
         assert_eq!(seen, u8::MAX);
+    }
+
+    #[test]
+    fn test_attribute_parameters_are_the_sgr_codes() {
+        // The table replaced integer formatting, so a typo in it would now be a
+        // silently wrong escape sequence rather than a compile error.
+        let expected = ["1", "2", "3", "4", "5", "7", "8", "9"];
+        let actual: Vec<&str> = ATTRIBUTES.iter().map(|&(_, p)| p).collect();
+        assert_eq!(actual, expected);
     }
 }
 

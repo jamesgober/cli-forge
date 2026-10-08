@@ -48,6 +48,47 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  features:
+    name: Feature matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every combination a consumer can actually select. The bare one is the
+        # `no_std` styling core, which is a real build rather than an empty
+        # crate, so it has to be exercised like any other.
+        features:
+          - "--no-default-features"
+          - "--no-default-features --features color"
+          - "--no-default-features --features unicode"
+          - "--no-default-features --features std"
+          - "--no-default-features --features std,color"
+          - "--no-default-features --features std,color,unicode,termsize"
+          - "--no-default-features --features std,auth"
+          - "--all-features"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy ${{ matrix.features }} --all-targets -- -D warnings
+      - name: Test
+        run: cargo test ${{ matrix.features }}
+
+  benchmarks:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Compiled but not run: timings from a shared runner are noise, and the
+      # point here is that the benchmarks still build against the live API.
+      - name: Build benchmarks
+        run: cargo bench --all-features --no-run
+
   security:
     name: Security (audit + deny)
     runs-on: ubuntu-latest
