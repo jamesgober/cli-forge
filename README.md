@@ -395,7 +395,7 @@ sibling crates that build on these seams:
 
 ## Documentation
 
-| | |
+| Document | Read this when |
 |---|---|
 | **[Guide](./docs/GUIDE.md)** | Start here. Install it, write a working program, understand the shape. ~15 minutes. |
 | **[Output & Styling](./docs/OUTPUT.md)** | Colours, themes, markers, aligned columns, markup, measuring text. |
