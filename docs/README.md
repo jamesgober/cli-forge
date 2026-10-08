@@ -110,7 +110,6 @@ ok("compiled 3 targets");
 // 4. An `App` holds commands, parses the command line, and runs the right one.
 let mut app = App::new("forge");
 app.register(Command::new("build").run(|_| out("building...")));
-# let _ = app;
 ```
 
 Most programs need `out`, a `Theme`, and an `App`. The rest of the surface exists

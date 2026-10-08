@@ -80,14 +80,13 @@ fn main() -> ExitCode {
 ```rust
 use cli_forge::Command;
 
-let cmd = Command::new("remove")
+let _cmd = Command::new("remove")
     .aliases(["rm", "del"])                 // also invokable as rm / del
     .about("delete build artifacts")        // one line, shown in the listing
     .long_about("Removes ./target and any cached downloads. Never \
                  touches source files.")    // the command's own page
     .display_order(3)                       // where it sits in the listing
     .hidden(false);                         // true = works, but not advertised
-# let _ = cmd;
 ```
 
 | Method | Does |
@@ -228,11 +227,34 @@ pub fn install(app: &mut App) {
 
 ```rust
 // src/main.rs
-# mod commands { pub mod build { pub fn install(app: &mut cli_forge::App) { let _ = app; } }
-#                pub mod test { pub fn install(app: &mut cli_forge::App) { let _ = app; } } }
 use std::process::ExitCode;
 
 use cli_forge::App;
+
+// In a real program these are `mod commands;` and separate files; written
+// inline here so the example compiles as one piece.
+mod commands {
+    pub mod build {
+        use cli_forge::{out, App, Arg, Command};
+
+        pub fn install(app: &mut App) {
+            app.register(
+                Command::new("build")
+                    .about("compile the project")
+                    .arg(Arg::flag("release").short('r'))
+                    .run(|_| out("building...")),
+            );
+        }
+    }
+
+    pub mod test {
+        use cli_forge::{App, Command};
+
+        pub fn install(app: &mut App) {
+            app.register(Command::new("test").about("run the tests").run(|_| {}));
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let mut app = App::new("forge");
@@ -257,7 +279,7 @@ plugin's setup function.
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("build")
+let _cmd = Command::new("build")
     // 1. A switch. Present or absent.
     //    forge build --release      forge build -r
     .arg(Arg::flag("release").short('r'))
@@ -273,7 +295,6 @@ let cmd = Command::new("build")
     // 4. A bare value, identified by position.
     //    forge build server
     .arg(Arg::positional("target"));
-# let _ = cmd;
 ```
 
 That is the whole list. Everything else is a refinement of one of those four.
@@ -313,7 +334,7 @@ Your handler receives a `Matches`:
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("build")
+let _cmd = Command::new("build")
     .arg(Arg::flag("release"))
     .arg(Arg::count("verbose"))
     .arg(Arg::option("jobs").default("1"))
@@ -325,7 +346,6 @@ let cmd = Command::new("build")
         let targets: Vec<&str> = m.values("targets").collect();
         let _ = (release, verbosity, jobs, targets);
     });
-# let _ = cmd;
 ```
 
 | Method | Returns | For |
@@ -487,14 +507,13 @@ Precedence is **command line, then environment, then default**:
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("push")
+let _cmd = Command::new("push")
     .arg(
         Arg::option("token")
             .env("FORGE_TOKEN")          // checked if not on the command line
             .help("credentials for the registry"),
     )
     .arg(Arg::option("jobs").default("1"));
-# let _ = cmd;
 ```
 
 An environment variable set to the empty string counts as unset, which is what
@@ -693,7 +712,6 @@ app.register(Command::new("read").run(|_| -> std::io::Result<()> {
     out(std::fs::read_to_string("forge.toml")?);
     Ok(())
 }));
-# let _ = app;
 ```
 
 `run` accepts any `Result<(), E>` where `E` can be printed — `io::Error`,
@@ -969,22 +987,28 @@ Gate a command behind a hook you supply. cli-forge holds the seam; the login
 state lives in your code:
 
 ```rust
-# #[cfg(feature = "auth")]
-# {
-use cli_forge::{App, Command, ErrorKind};
+#[cfg(feature = "auth")]
+fn main() {
+    use cli_forge::{App, Command, ErrorKind};
 
-let mut app = App::new("forge").auth(|req| {
-    // `req.command()` is the command name; `req.path()` is the whole chain.
-    req.command() != "publish" || session_is_valid()
-});
+    let mut app = App::new("forge").auth(|req| {
+        // `req.command()` is the command name; `req.path()` is the whole chain.
+        req.command() != "publish" || session_is_valid()
+    });
 
-app.register(Command::new("publish").requires_auth(true).run(|_| {}));
+    app.register(Command::new("publish").requires_auth(true).run(|_| {}));
 
-fn session_is_valid() -> bool { false }
+    let err = app.try_run_from(["publish"]).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Unauthorized);
+}
 
-let err = app.try_run_from(["publish"]).unwrap_err();
-assert_eq!(err.kind(), ErrorKind::Unauthorized);
-# }
+/// Wherever your login state actually lives.
+fn session_is_valid() -> bool {
+    false
+}
+
+#[cfg(not(feature = "auth"))]
+fn main() {}
 ```
 
 Three things to know:
@@ -1006,8 +1030,10 @@ normally.
 
 `try_parse_from` is the one to test with: it parses and nothing else.
 
+Build the app in a helper so every test starts from the same definition, then
+wrap each `fn main` body below in `#[test] fn whatever_it_checks()`:
+
 ```rust
-# fn main() {}
 use cli_forge::{App, Arg, Command, ErrorKind};
 
 fn app() -> App {
@@ -1020,16 +1046,14 @@ fn app() -> App {
     app
 }
 
-#[test]
-fn parses_a_normal_invocation() {
+fn main() {
+    // #[test] fn parses_a_normal_invocation()
     let m = app().try_parse_from(["build", "-r", "--jobs", "8"]).unwrap();
     let build = m.leaf();
     assert!(build.flag("release"));
     assert_eq!(build.get::<u16>("jobs"), Some(8));
-}
 
-#[test]
-fn rejects_an_unknown_flag() {
+    // #[test] fn rejects_an_unknown_flag()
     let err = app().try_parse_from(["build", "--bogus"]).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::UnknownFlag);
 }
@@ -1038,11 +1062,10 @@ fn rejects_an_unknown_flag() {
 To test a handler, use `try_run_from` and assert on its outcome:
 
 ```rust
-# fn main() {}
 use cli_forge::{App, Command};
 
-#[test]
-fn a_failing_command_reports_its_message() {
+fn main() {
+    // #[test] fn a_failing_command_reports_its_message()
     let mut app = App::new("forge");
     app.register(Command::new("pull").run(|_| Err("not a repository")));
 
@@ -1056,22 +1079,45 @@ The nested `Result` is deliberate: the outer one is about the command line, the
 inner one about the work. A bad invocation and a failed command deserve different
 handling.
 
-To make styled output deterministic in a test, force a depth:
+To make styled output deterministic, render at an explicit depth. This touches no
+process state, so such tests are safe to run in parallel:
 
 ```rust
-# fn main() {}
-use cli_forge::{terminal, ColorChoice};
+use cli_forge::{ColorLevel, Style};
 
-#[test]
-fn output_is_plain_in_tests() {
-    terminal::set_color_choice(ColorChoice::Never);
-    // ...assert on plain text...
-    terminal::set_color_choice(ColorChoice::Auto);
+fn main() {
+    // #[test] fn renders_the_expected_bytes()
+    let bytes = Style::new()
+        .red()
+        .bold()
+        .paint_at("ERR", ColorLevel::Ansi16)
+        .to_string();
+    assert_eq!(bytes, "\u{1b}[1;31mERR\u{1b}[0m");
 }
 ```
 
-Or render at an explicit depth with `paint_at` / `render_at` / `markup_at`, which
-touch no process state and are safe to run in parallel.
+`markup_at` and `Theme::render_at` do the same for the other two paths. Where you
+must assert on something that detects — a help page, for instance — strip the
+escapes instead:
+
+```rust
+use cli_forge::{text, App, Command};
+
+fn main() {
+    // #[test] fn help_mentions_the_command()
+    let mut app = App::new("forge");
+    app.register(Command::new("build").about("compile"));
+
+    // Section headings are styled, so strip before asserting on content.
+    let help = text::strip(&app.help()).into_owned();
+    assert!(help.contains("build"));
+    assert!(help.contains("compile"));
+}
+```
+
+`terminal::set_color_choice(ColorChoice::Never)` also works, but it is
+process-wide: tests run in parallel by default, so one test turning colour off
+affects the others. Prefer the explicit-depth form.
 
 ---
 

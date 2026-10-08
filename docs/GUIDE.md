@@ -170,7 +170,6 @@ app.register(
             out(format!("release={}", matches.flag("release")));
         }),
 );
-# let _ = app;
 ```
 
 Everything else in the crate is a refinement of one of those six.
@@ -251,7 +250,7 @@ Four kinds of argument, and that is the whole list:
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("build")
+let _cmd = Command::new("build")
     // --release / -r        a switch: on or off
     .arg(Arg::flag("release").short('r'))
     // -vvv                  a switch you can repeat, counted
@@ -260,7 +259,6 @@ let cmd = Command::new("build")
     .arg(Arg::option("jobs").short('j').default("1"))
     // forge build server    a bare value, by position
     .arg(Arg::positional("target"));
-# let _ = cmd;
 ```
 
 Reading them back:
@@ -268,7 +266,7 @@ Reading them back:
 ```rust
 use cli_forge::{out, Arg, Command};
 
-let cmd = Command::new("build")
+let _cmd = Command::new("build")
     .arg(Arg::flag("release").short('r'))
     .arg(Arg::count("verbose").short('v'))
     .arg(Arg::option("jobs").short('j').default("1"))
@@ -281,7 +279,6 @@ let cmd = Command::new("build")
 
         out(format!("{target}: release={release} jobs={jobs} v={verbosity}"));
     });
-# let _ = cmd;
 ```
 
 Every form a user might type already works, without you doing anything:
@@ -303,13 +300,12 @@ parser refuse it before your code runs:
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("log")
+let _cmd = Command::new("log")
     .arg(Arg::option("level").possible_values(["warn", "info", "debug"]))
     .run(|m| {
         // By the time this runs, `level` is one of those three. Guaranteed.
         let _ = m.value("level");
     });
-# let _ = cmd;
 ```
 
 ```console
@@ -347,7 +343,6 @@ app.register(Command::new("read").run(|_| -> std::io::Result<()> {
     cli_forge::out(text);
     Ok(())
 }));
-# let _ = app;
 ```
 
 ```console
@@ -366,9 +361,8 @@ answers), use `run_status`:
 ```rust
 use cli_forge::{Command, CommandError};
 
-let cmd = Command::new("diff")
+let _cmd = Command::new("diff")
     .run_status(|_| Err(CommandError::new("files differ").with_code(1)));
-# let _ = cmd;
 ```
 
 ---

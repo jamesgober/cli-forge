@@ -386,7 +386,7 @@ fn build(m: &Matches) {
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("serve")
+let _cmd = Command::new("serve")
     .arg(
         Arg::option("port")
             .default("8080")
@@ -401,7 +401,6 @@ let cmd = Command::new("serve")
         let port: u16 = m.get("port").unwrap_or(8080);
         let _ = port;
     });
-# let _ = cmd;
 ```
 
 ---
@@ -411,7 +410,7 @@ let cmd = Command::new("serve")
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("log")
+let _cmd = Command::new("log")
     .arg(Arg::option("level").possible_values(["warn", "info", "debug"]).default("info"))
     .run(|m| {
         match m.value("level") {
@@ -420,7 +419,6 @@ let cmd = Command::new("log")
             _ => {}
         }
     });
-# let _ = cmd;
 ```
 
 The set appears in help, is enforced, and powers the correction for a typo.
@@ -432,7 +430,7 @@ The set appears in help, is enforced, and powers the correction for a typo.
 ```rust
 use cli_forge::{Arg, Command};
 
-let cmd = Command::new("publish")
+let _cmd = Command::new("publish")
     .arg(
         Arg::option("token")
             .env("FORGE_TOKEN")
@@ -446,7 +444,6 @@ let cmd = Command::new("publish")
         let _ = token;
         Ok(())
     });
-# let _ = cmd;
 ```
 
 `FORGE_TOKEN` is not visible in `ps`; `--token abc123` is.
@@ -560,11 +557,34 @@ pub fn install(app: &mut App) {
 
 ```rust
 // src/main.rs
-# mod commands { pub mod build { pub fn install(a: &mut cli_forge::App) { let _ = a; } }
-#                pub mod test { pub fn install(a: &mut cli_forge::App) { let _ = a; } } }
 use std::process::ExitCode;
 
 use cli_forge::App;
+
+// In a real program: `mod commands;` plus src/commands/{build,test}.rs.
+// Written inline here so the example compiles as one piece.
+mod commands {
+    pub mod build {
+        use cli_forge::{out, App, Arg, Command};
+
+        pub fn install(app: &mut App) {
+            app.register(
+                Command::new("build")
+                    .about("compile the project")
+                    .arg(Arg::flag("release").short('r'))
+                    .run(|_| out("building...")),
+            );
+        }
+    }
+
+    pub mod test {
+        use cli_forge::{App, Command};
+
+        pub fn install(app: &mut App) {
+            app.register(Command::new("test").run(|_| {}));
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let mut app = App::new("forge");
@@ -652,7 +672,6 @@ assert!(app.try_parse_from(["build", "--dump-ast"]).is_ok());
 ## Test a command without running it
 
 ```rust
-# fn main() {}
 use cli_forge::{App, Arg, Command, ErrorKind};
 
 fn app() -> App {
@@ -666,16 +685,14 @@ fn app() -> App {
     app
 }
 
-#[test]
-fn parses_without_dispatching() {
+// Wrap each of these in `#[test] fn whatever_it_checks()` in your own tests.
+fn main() {
+    // Parsing does not dispatch, so the panicking handler above never runs.
     let m = app().try_parse_from(["build", "-r", "--jobs", "8"]).unwrap();
     let build = m.leaf();
     assert!(build.flag("release"));
     assert_eq!(build.get::<u16>("jobs"), Some(8));
-}
 
-#[test]
-fn rejects_an_unknown_flag() {
     let err = app().try_parse_from(["build", "--bogus"]).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::UnknownFlag);
     assert_eq!(err.suggestion(), None);
@@ -692,11 +709,10 @@ Best: render at an explicit depth, which touches no process state and is safe in
 parallel.
 
 ```rust
-# fn main() {}
 use cli_forge::{ColorLevel, Style};
 
-#[test]
-fn renders_the_expected_bytes() {
+fn main() {
+    // #[test] fn renders_the_expected_bytes()
     let bytes = Style::new().red().bold().paint_at("ERR", ColorLevel::Ansi16).to_string();
     assert_eq!(bytes, "\u{1b}[1;31mERR\u{1b}[0m");
 }
@@ -705,11 +721,10 @@ fn renders_the_expected_bytes() {
 If you must assert on something that detects, strip instead:
 
 ```rust
-# fn main() {}
 use cli_forge::{text, App, Command};
 
-#[test]
-fn help_mentions_the_command() {
+fn main() {
+    // #[test] fn help_mentions_the_command()
     let mut app = App::new("forge");
     app.register(Command::new("build").about("compile"));
 
