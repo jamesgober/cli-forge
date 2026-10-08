@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3ef02ab5fc5645ce7f2419abcb56d75c6c82334bd6bc94702fe1a76e8e4779c4 # shrinks to input = "\u{1b}¡"
+cc 0f8124f1fda132535f34d3dea79e86f49671955120260d030c6e95da4ea77401 # shrinks to input = "\u{1b}¡"
+cc 7b8c786095d48906fbcd1baba9d0a3ef3595aafdaace99c5dea0970577462c9c # shrinks to input = "\u{1b}¡", columns = 0
+cc cd7d77946aa70548e7953d133e7ce0a5290864edacb1745f79cfd7b4dac305cf # shrinks to input = "\u{1b}¡", columns = 1
+cc 087a713d6478d491378fdb428624b71a2cff9aa5819dc47a96643e3cdf90941e # shrinks to input = "aaaaaa  aaaaaaa  ", columns = 1
+cc 23c1605bd89daa5baf9d4c5c01c36ce7671109fc62abd1019b20cd4934a31644 # shrinks to input = "¡\u{1b}⼀", columns = 1

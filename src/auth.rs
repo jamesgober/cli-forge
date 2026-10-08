@@ -41,6 +41,7 @@ pub(crate) type AuthHook = Box<dyn Fn(&AuthRequest<'_>) -> bool>;
 /// # let _ = app.try_parse_from(["publish"]);
 /// # }
 /// ```
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct AuthRequest<'a> {
     path: &'a [&'a str],

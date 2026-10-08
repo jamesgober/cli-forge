@@ -16,6 +16,7 @@ use crate::arg::{Arg, ArgKind};
 use crate::command::Command;
 use crate::parser::Cli;
 use crate::style::style;
+use crate::text;
 
 /// Render the top-level application help.
 pub(crate) fn render_app(cli: &Cli) -> String {
@@ -230,24 +231,24 @@ fn option_signature(arg: &Arg) -> String {
 fn app_column_width(commands: &[&Command], has_version: bool) -> usize {
     let mut width = commands
         .iter()
-        .map(|c| invocation(c).len())
+        .map(|c| text::width(&invocation(c)))
         .max()
         .unwrap_or(0);
-    width = width.max("-h, --help".len());
+    width = width.max(text::width("-h, --help"));
     if has_version {
-        width = width.max("-V, --version".len());
+        width = width.max(text::width("-V, --version"));
     }
     width
 }
 
 fn command_column_width(positionals: &[&Arg], options: &[&Arg], subcommands: &[&Command]) -> usize {
-    let positional = positionals.iter().map(|a| positional_slot(a).len());
-    let option = options.iter().map(|a| option_signature(a).len());
-    let sub = subcommands.iter().map(|c| invocation(c).len());
+    let positional = positionals.iter().map(|a| text::width(&positional_slot(a)));
+    let option = options.iter().map(|a| text::width(&option_signature(a)));
+    let sub = subcommands.iter().map(|c| text::width(&invocation(c)));
     positional
         .chain(option)
         .chain(sub)
-        .chain(std::iter::once("-h, --help".len()))
+        .chain(std::iter::once(text::width("-h, --help")))
         .max()
         .unwrap_or(0)
 }

@@ -1,171 +1,204 @@
-//! Named styles: define once, reuse anywhere.
+//! Named styles: describe once, recall anywhere.
 //!
-//! [`define_tag`] stores a [`Style`]'s attributes under a name; [`tag`] looks
-//! that name back up and applies it to fresh text. This is the DRY styling path
-//! — a style is described in one place and recalled from anywhere in the program
-//! without repeating its color and attributes at every call site.
+//! [`define`] stores a [`Style`] under a name and [`named`] looks it back up.
+//! This is the path for a program's own visual vocabulary — the styles that are
+//! neither one of the [`Level`](crate::Level) severities a
+//! [`Theme`](crate::Theme) covers nor a one-off, but that appear in a dozen
+//! places and must look the same in all of them.
+//!
+//! Because a [`Style`] carries its decoration as well as its colours, a name
+//! captures the *whole* appearance — glyph, spacing, and column width included —
+//! so a call site never rebuilds a marker by hand:
+//!
+//! ```
+//! use cli_forge::{define, named, out, Style};
+//!
+//! define("step", Style::new().bright_black().prefix("  → ").pad_to(24));
+//!
+//! out(named("step").paint("resolve dependencies"));
+//! out(named("step").paint("compile"));
+//! ```
 //!
 //! The store is process-global because that is the point: a name defined in one
-//! module must resolve in another. It is a small read-mostly map behind an
-//! [`RwLock`], guarded so a poisoned lock degrades to plain output instead of
-//! taking down the program — styling is never critical enough to panic over.
+//! module must resolve in another, including across crate boundaries in a plugin
+//! that was compiled separately. Two consequences follow, and both are deliberate:
+//! a later [`define`] of the same name replaces the earlier one (last writer
+//! wins, which is what lets a program re-theme a library's output), and names are
+//! worth prefixing in library code (`mycrate.step`) so two libraries cannot
+//! quietly collide.
+//!
+//! ## Cost
+//!
+//! A lookup takes a read lock on a small map and clones the [`Style`] it finds,
+//! so the idiom for a loop is to look up once and reuse:
+//!
+//! ```
+//! # use cli_forge::{define, named, out, Style};
+//! # define("row", Style::new().bold());
+//! let row = named("row");
+//! for item in ["a", "b", "c"] {
+//!     out(row.paint(item));
+//! }
+//! ```
+//!
+//! The store degrades rather than panics: if its lock has been poisoned by a
+//! panic elsewhere, [`define`] skips the definition and [`named`] returns a plain
+//! style. Styling is never important enough to take a program down over.
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
-use crate::Style;
-use crate::style::{StyleAttrs, write_styled};
-use crate::terminal;
+use crate::style::Style;
 
-/// The global name → attributes map, created on first use.
-fn store() -> &'static RwLock<HashMap<String, StyleAttrs>> {
-    static STORE: OnceLock<RwLock<HashMap<String, StyleAttrs>>> = OnceLock::new();
+/// The global name → style map, created on first use.
+fn store() -> &'static RwLock<HashMap<String, Style>> {
+    static STORE: OnceLock<RwLock<HashMap<String, Style>>> = OnceLock::new();
     STORE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Define a reusable named style.
 ///
-/// Only the color and attributes of `style` are stored; its text is ignored, so
-/// the idiom is to define from an empty [`style`](crate::style). Defining the
-/// same name again replaces the previous definition.
+/// Defining the same name again replaces the previous definition. The style's own
+/// text, if it has any, is irrelevant — [`named`] hands back the style for
+/// painting other text — so the idiom is to build from [`Style::new`].
 ///
 /// # Examples
 ///
 /// ```
-/// use cli_forge::{define_tag, out, style, tag};
+/// use cli_forge::{define, named, out, Style};
 ///
-/// define_tag("error", style("").red().bold());
-/// define_tag("hint", style("").cyan());
+/// define("error", Style::new().red().bold().prefix("✗ "));
+/// define("hint", Style::new().cyan());
 ///
-/// out(tag("error").render_with("build failed"));
-/// out(tag("hint").render_with("try `--release`"));
+/// out(named("error").paint("build failed"));
+/// out(named("hint").paint("try `--release`"));
 /// ```
-pub fn define_tag<S: Into<String>>(name: S, style: Style) {
-    let attrs = style.attrs();
+pub fn define(name: impl Into<String>, style: Style) {
     if let Ok(mut map) = store().write() {
         // Replacing any previous definition for this name is intended.
-        let _ = map.insert(name.into(), attrs);
+        let _ = map.insert(name.into(), style);
     }
     // A poisoned lock means another thread panicked mid-write. Skipping the
     // definition keeps this fire-and-forget call non-panicking.
 }
 
-/// Look up a named style defined by [`define_tag`].
+/// Look up a style defined by [`define`].
 ///
-/// An unknown name yields a [`Tag`] that renders its text plain, so missing
-/// definitions degrade gracefully rather than erroring.
+/// An unknown name yields a plain [`Style`], so a missing definition prints its
+/// text unstyled instead of erroring — a program must not die because a theme
+/// forgot a name. Use [`defined`] when the difference matters.
 ///
 /// # Examples
 ///
 /// ```
-/// use cli_forge::{define_tag, style, tag};
+/// use cli_forge::{define, named, Style};
 ///
-/// define_tag("ok", style("").green());
-/// assert!(tag("ok").render_with("passed").contains("passed"));
+/// define("ok", Style::new().green());
+/// assert!(named("ok").paint("passed").to_string().contains("passed"));
 ///
-/// // Undefined names still render the text, just without styling.
-/// assert_eq!(tag("never-defined").render_with("text"), "text");
+/// // An undefined name still renders the text, just without styling.
+/// assert_eq!(named("never-defined").paint("text").to_string(), "text");
 /// ```
 #[must_use]
-pub fn tag(name: &str) -> Tag {
-    let attrs = store().read().ok().and_then(|map| map.get(name).copied());
-    Tag { attrs }
+pub fn named(name: &str) -> Style {
+    store()
+        .read()
+        .ok()
+        .and_then(|map| map.get(name).cloned())
+        .unwrap_or_default()
 }
 
-/// A resolved named style, returned by [`tag`].
+/// Whether `name` has been defined.
 ///
-/// Holds a snapshot of the named style's attributes (or none, for an unknown
-/// name), so it can render text without holding the registry lock.
-#[derive(Clone, Copy, Debug)]
-pub struct Tag {
-    attrs: Option<StyleAttrs>,
-}
-
-impl Tag {
-    /// Render `text` with this named style, returning an owned `String`.
-    ///
-    /// Color depth matches the terminal detected for standard output. For an
-    /// unknown name the text is returned unchanged.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cli_forge::{define_tag, style, tag};
-    ///
-    /// define_tag("warn", style("").yellow().bold());
-    /// let line = tag("warn").render_with("disk almost full");
-    /// assert!(line.contains("disk almost full"));
-    /// ```
-    #[must_use]
-    pub fn render_with(&self, text: &str) -> String {
-        let mut buf = String::with_capacity(text.len() + 24);
-        // Writing to a `String` is infallible.
-        let _ = write_styled(
-            &mut buf,
-            self.attrs_or_empty(),
-            text,
-            terminal::color_level(),
-        );
-        buf
-    }
-
-    /// The captured attributes, or an empty set for an unknown name. Used by the
-    /// cross-path equality tests to render at an explicit color level.
-    #[cfg(test)]
-    pub(crate) fn attrs_or_empty(&self) -> StyleAttrs {
-        self.attrs.unwrap_or(StyleAttrs::EMPTY)
-    }
-
-    #[cfg(not(test))]
-    fn attrs_or_empty(&self) -> StyleAttrs {
-        self.attrs.unwrap_or(StyleAttrs::EMPTY)
-    }
+/// Lets a program fill in a default only when a theme has not already supplied
+/// one, rather than overwriting it.
+///
+/// # Examples
+///
+/// ```
+/// use cli_forge::{define, defined, Style};
+///
+/// assert!(!defined("registry-doc-example"));
+/// define("registry-doc-example", Style::new().bold());
+/// assert!(defined("registry-doc-example"));
+/// ```
+#[must_use]
+pub fn defined(name: &str) -> bool {
+    store().read().is_ok_and(|map| map.contains_key(name))
 }
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
-
     use super::*;
-    use crate::style::style;
     use crate::terminal::ColorLevel;
-
-    /// Render a resolved tag's captured attributes at an explicit level.
-    fn render_resolved(resolved: &Tag, text: &str, level: ColorLevel) -> String {
-        let attrs = resolved.attrs.unwrap_or(StyleAttrs::EMPTY);
-        let mut s = String::new();
-        write_styled(&mut s, attrs, text, level).unwrap();
-        s
-    }
+    use crate::text;
 
     #[test]
-    fn test_define_and_recall_applies_attributes() {
-        define_tag("reg-error", style("").red().bold());
-        let resolved = tag("reg-error");
+    fn test_define_and_recall_applies_the_whole_appearance() {
+        define("reg-error", Style::new().red().bold().prefix("✗ "));
+        let style = named("reg-error");
         assert_eq!(
-            render_resolved(&resolved, "failed", ColorLevel::Ansi16),
-            "\x1b[1;31mfailed\x1b[0m"
+            style.paint_at("failed", ColorLevel::Ansi16).to_string(),
+            "\x1b[1;31m✗ failed\x1b[0m"
         );
     }
 
     #[test]
     fn test_redefining_replaces() {
-        define_tag("reg-x", style("").red());
-        define_tag("reg-x", style("").green());
-        let resolved = tag("reg-x");
+        define("reg-x", Style::new().red());
+        define("reg-x", Style::new().green());
         assert_eq!(
-            render_resolved(&resolved, "v", ColorLevel::Ansi16),
+            named("reg-x").paint_at("v", ColorLevel::Ansi16).to_string(),
             "\x1b[32mv\x1b[0m"
         );
     }
 
     #[test]
-    fn test_unknown_tag_is_plain() {
-        assert_eq!(tag("reg-undefined").render_with("text"), "text");
-        let resolved = tag("reg-undefined");
-        assert_eq!(
-            render_resolved(&resolved, "text", ColorLevel::TrueColor),
-            "text"
-        );
+    fn test_unknown_name_is_plain_at_every_depth() {
+        for level in [ColorLevel::None, ColorLevel::Ansi16, ColorLevel::TrueColor] {
+            assert_eq!(
+                named("reg-undefined").paint_at("text", level).to_string(),
+                "text"
+            );
+        }
+        assert!(named("reg-undefined").is_plain());
+    }
+
+    #[test]
+    fn test_defined_reports_presence() {
+        assert!(!defined("reg-absent"));
+        define("reg-present", Style::new().bold());
+        assert!(defined("reg-present"));
+    }
+
+    #[test]
+    fn test_a_name_captures_padding_so_columns_stay_straight() {
+        // The duplication this module exists to remove: the width travels with
+        // the name instead of being re-specified at each call site.
+        define("reg-step", Style::new().prefix("→ ").pad_to(12));
+        let step = named("reg-step");
+        for label in ["a", "resolve", "ten chars!"] {
+            let line = step.paint_at(label, ColorLevel::None).to_string();
+            assert_eq!(text::width(&line), 12, "{label}");
+        }
+        // Content past the budget is kept whole rather than cut.
+        let long = step
+            .paint_at("far longer than the field", ColorLevel::None)
+            .to_string();
+        assert!(text::width(&long) > 12);
+        assert!(long.contains("far longer than the field"));
+    }
+
+    #[test]
+    fn test_lookup_can_be_hoisted_out_of_a_loop() {
+        define("reg-row", Style::new().bold());
+        let row = named("reg-row");
+        // One lookup, many paints — the documented idiom, and it must keep
+        // working without re-borrowing the store.
+        let rendered: Vec<String> = ["a", "b"]
+            .iter()
+            .map(|item| row.paint_at(item, ColorLevel::None).to_string())
+            .collect();
+        assert_eq!(rendered, ["a", "b"]);
     }
 }

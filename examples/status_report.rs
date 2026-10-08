@@ -1,49 +1,79 @@
-//! A realistic slice of CLI output: a deploy-style status report that defines a
-//! small palette of named styles up front and reuses them, mixing plain lines,
-//! the builder, and inline tags the way a real tool would.
+//! A realistic slice of CLI output: a deploy-style status report.
+//!
+//! The point of this example is what is *not* in it. No call site names a
+//! colour, pads a column, or picks a glyph. The theme states the program's
+//! vocabulary once; every line after that just says what happened. Swap the
+//! theme at the top and the whole report changes appearance together.
 //!
 //! ```bash
 //! cargo run --example status_report
+//!
+//! # The same report with no styling at all:
+//! NO_COLOR=1 cargo run --example status_report
+//!
+//! # And with ASCII markers, as on a legacy console:
+//! NO_UNICODE=1 cargo run --example status_report
 //! ```
 
-use cli_forge::{define_tag, out, parse, style, tag};
+use cli_forge::{Level, Style, Theme, define, fail, markup, named, note, ok, out, style, warn};
 
 fn main() {
-    // Define the program's vocabulary of styles once.
-    define_tag("ok", style("").green().bold());
-    define_tag("warn", style("").yellow().bold());
-    define_tag("fail", style("").red().bold());
-    define_tag("muted", style("").rgb(136, 136, 136));
+    // The program's vocabulary, stated once.
+    // `style_for` changes the colour and leaves the marker to the theme, so the
+    // Unicode-or-ASCII decision stays automatic. `set` would pin the glyph and
+    // take that choice away, which is right for a brand mark and wrong here.
+    Theme::new()
+        .style_for(Level::Success, Style::new().bright_green().bold())
+        .style_for(Level::Warning, Style::new().bright_yellow().bold())
+        .style_for(Level::Error, Style::new().bright_red().bold())
+        .set(Level::Note, Style::new().bright_black(), "")
+        .install();
+
+    // Two named styles for the step line, so the column widths live in exactly
+    // one place instead of in every `format!` that prints a step.
+    define("step", Style::new().pad_to(22));
+    define("detail", Style::new().bright_black());
 
     out(style("deploy: staging").bold().underline());
     out("");
 
-    step("resolve dependencies", Status::Ok);
-    step("compile (release)", Status::Ok);
-    step("run test suite", Status::Warn);
-    step("upload artifacts", Status::Ok);
-    step("smoke test", Status::Fail);
+    step("resolve dependencies", Status::Ok, "0.4s");
+    step("compile (release)", Status::Ok, "31.7s");
+    step("run test suite", Status::Warn, "12 of 14");
+    step("upload artifacts", Status::Ok, "2.1s");
+    step("smoke test", Status::Fail, "timeout");
 
     out("");
-    parse("<b>result</b>: <c=red>1 step failed</c> — see <c=#3b82f6><u>logs/smoke.txt</u></c>");
-    out(tag("muted").render_with("finished in 48.2s"));
+    out(markup(
+        "<b>result</b>: <c=red>1 step failed</c> — see <c=#3b82f6><u>logs/smoke.txt</u></c>",
+    ));
+    note("finished in 48.2s");
 }
 
+/// How one deploy step turned out.
 enum Status {
     Ok,
     Warn,
     Fail,
 }
 
-/// Print one status line, reusing the named styles defined in `main`.
-fn step(label: &str, status: Status) {
-    let name = match status {
-        Status::Ok => "ok",
-        Status::Warn => "warn",
-        Status::Fail => "fail",
-    };
-    // Pad the text to a fixed width *before* styling it, so the visible columns
-    // line up whether or not color (and its zero-width escape bytes) is applied.
-    let marker = tag(name).render_with(&format!("{:<6}", format!("[{name}]")));
-    out(format!("  {marker} {label}"));
+/// Print one status line: marker, label, and detail, in three columns.
+///
+/// Compare this with the hand-rolled version it replaces: there is no `format!`
+/// building a padded marker, no lookup table from status to colour, and nothing
+/// that has to know a glyph is one column wide. The label's width comes from the
+/// named style and the marker from the theme, so either can change without this
+/// function being touched — and the width is measured in display columns, so the
+/// third column stays straight even when a label is not ASCII.
+fn step(label: &str, status: Status, detail: &str) {
+    let line = format!(
+        "{} {}",
+        named("step").paint(label),
+        named("detail").paint(detail)
+    );
+    match status {
+        Status::Ok => ok(line),
+        Status::Warn => warn(line),
+        Status::Fail => fail(line),
+    }
 }

@@ -1,48 +1,85 @@
 //! # cli-forge
 //!
 //! A unified command-line framework where argument parsing and styled output
-//! speak one API. This release delivers the output layer every other piece — and
-//! every sibling crate in the cli collection — is built on: one styling system,
-//! reached three ways, over a single cross-platform terminal backend.
+//! speak one API. Two things make it different from the alternatives: output is
+//! *themed and reusable* rather than restyled at every call site, and the whole
+//! styling layer is a seam that sibling crates — tables, progress bars,
+//! gradients — build on, so everything a program prints speaks one system.
 //!
-//! ## The three styling paths
+//! ## Output, four ways
 //!
-//! Plain text is the common case and stays cheap — [`out`] and [`err`] do no
-//! parsing and no allocation for a string literal:
+//! Plain text is the common case and stays cheap: [`out`] and [`err`] do no
+//! parsing and no allocation for a string literal.
 //!
 //! ```
-//! use cli_forge::{out, err};
+//! # #[cfg(feature = "std")] fn main() {
+//! use cli_forge::{err, out};
 //!
 //! out("building...");
 //! err("something went wrong");
+//! # }
+//! # #[cfg(not(feature = "std"))] fn main() {}
 //! ```
 //!
-//! When you want color, opt into one of three paths that all render to the same
-//! bytes for the same intent:
+//! When you want colour, pick whichever path suits the call — all of them render
+//! to the same bytes for the same intent:
 //!
 //! ```
-//! use cli_forge::{define_tag, out, parse, style, tag};
+//! # #[cfg(feature = "std")] fn main() {
+//! use cli_forge::{define, markup, named, out, style, Style};
 //!
-//! // 1. The builder — chain methods, drop the result into `out`.
+//! // 1. The builder — chain, then drop the result into `out`.
 //! out(style("done").green().bold());
 //!
-//! // 2. Inline tags — markup parsed only here, never in `out`.
-//! parse("<c=red><b>ERROR:</b></c> <c=#ff8800>disk almost full</c>");
+//! // 2. Inline markup — parsed only here, never in `out`.
+//! out(markup("<c=red><b>ERROR:</b></c> <c=#ff8800>disk almost full</c>"));
 //!
-//! // 3. A named style — define once, reuse anywhere.
-//! define_tag("error", style("").red().bold());
-//! out(tag("error").render_with("build failed"));
+//! // 3. A named style — described once, recalled anywhere, glyph and width
+//! //    included, so no call site hand-builds a marker.
+//! define("ok", Style::new().green().bold().prefix("✓ ").pad_to(10));
+//! out(named("ok").paint("resolve dependencies"));
+//!
+//! // 4. A theme level — the vocabulary every program already has.
+//! cli_forge::ok("deployed to staging");
+//! cli_forge::warn("2 tests skipped");
+//! # }
+//! # #[cfg(not(feature = "std"))] fn main() {}
 //! ```
 //!
-//! ## Colors and terminals
+//! ## Themed, reusable responses
 //!
-//! Colors are the eight standard names, plus any 24-bit value via
-//! [`Style::hex`] / [`Style::rgb`] or a `<c=#rrggbb>` / `<c=r,g,b>` tag. The
-//! terminal's capability is detected once: on a true-color terminal the exact
-//! value is emitted; on a 256- or 16-color terminal it is downgraded to the
-//! nearest representable color; on a pipe, under `NO_COLOR`, or with the `color`
-//! feature off, styling is dropped and only text is written. The Windows console
-//! is handled behind the same API as Unix terminals.
+//! The fourth path is the one most programs want. A [`Theme`] maps the levels a
+//! CLI actually speaks in — success, error, warning, info, hint, and the rest —
+//! onto a style and a glyph, once, and [`ok`], [`fail`], [`warn`], [`info`],
+//! [`hint`], [`note`], [`debug`], and [`trace`] print through it. Replace the
+//! theme and every line in the program changes together:
+//!
+//! ```
+//! # #[cfg(feature = "std")] fn main() {
+//! use cli_forge::{Level, Style, Theme};
+//!
+//! Theme::new()
+//!     .set(Level::Success, Style::new().bright_green().bold(), "✓")
+//!     .set(Level::Error, Style::new().bright_red().bold(), "✗")
+//!     .install();
+//!
+//! cli_forge::ok("nothing in this call names a colour");
+//! # }
+//! # #[cfg(not(feature = "std"))] fn main() {}
+//! ```
+//!
+//! Glyphs fall back to ASCII where the destination cannot render them, and
+//! diagnostics go to standard error while data goes to standard output, so piped
+//! output stays clean without the program arranging it.
+//!
+//! ## Colours and terminals
+//!
+//! Colours are the sixteen terminal names, any 256-palette index, or any 24-bit
+//! value via [`Style::hex`] / [`Style::rgb`] / [`Style::fg`]. Capability is
+//! detected *per stream*, so redirecting one does not silence the other, and an
+//! exact colour degrades to the nearest the terminal can render rather than being
+//! dropped. [`terminal::set_color_choice`] is what a `--color` flag drives. The
+//! Windows console is handled behind the same API as Unix terminals.
 //!
 //! ## Commands
 //!
@@ -51,7 +88,8 @@
 //! run the selected command's handler:
 //!
 //! ```no_run
-//! use cli_forge::{App, Arg, Command, out};
+//! # #[cfg(feature = "std")] fn main() {
+//! use cli_forge::{out, App, Arg, Command};
 //!
 //! let mut app = App::new("forge");
 //! app.register(
@@ -62,24 +100,38 @@
 //!         .run(|m| out(format!("release={} jobs={}", m.flag("release"), m.value("jobs").unwrap_or("?")))),
 //! );
 //! let _ = app.parse();
+//! # }
+//! # #[cfg(not(feature = "std"))] fn main() {}
 //! ```
 //!
 //! Malformed input never panics: [`App::parse`] prints a structured
 //! [`ParseError`] and exits, while [`App::try_parse_from`] returns it.
 //!
+//! ## Untrusted text
+//!
+//! A string that came from outside the program — a filename, a server response,
+//! a commit message — can contain escape sequences, and printing it verbatim
+//! hands the terminal to whoever wrote it. [`text::sanitize`] neutralises that,
+//! and [`text::width`] / [`text::strip`] / [`text::truncate`] measure and shape
+//! text that is already styled.
+//!
 //! ## Feature flags
 //!
 //! - **`std`** *(default)* — terminal detection, the stdout/stderr writers, and
-//!   the command layer.
+//!   the command layer. Without it, the styling core still works on `alloc`.
 //! - **`color`** *(default)* — ANSI styled output. Disable for plain output; the
 //!   API stays complete and every styled value renders as its plain text.
-//! - **`auth`** — the authorization seam: `App::auth`, `AuthRequest`, and
+//! - **`unicode`** *(default)* — correct display widths for CJK, emoji, and
+//!   combining marks.
+//! - **`termsize`** *(default)* — wrap help to the real terminal width.
+//! - **`auth`** — the authorization seam: [`App::auth`], [`AuthRequest`], and
 //!   enforcement of [`Command::requires_auth`].
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
+#![deny(missing_debug_implementations)]
 #![deny(unused_must_use)]
 #![deny(unused_results)]
 #![deny(clippy::unwrap_used)]
@@ -91,14 +143,52 @@
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+/// The owning types the crate uses, sourced from `alloc` or `std` depending on
+/// the build.
+///
+/// The styling core needs heap allocation but not an operating system, so it is
+/// written against these aliases rather than against `std` directly. That is the
+/// whole mechanism behind the `no_std` build — there is no second
+/// implementation to keep in step.
+// Which aliases are referenced depends on the feature set and on whether the
+// test modules are being compiled, so a shim always has some that this build
+// happens not to need.
+#[allow(unused_imports)]
+pub(crate) mod shim {
+    #[cfg(not(feature = "std"))]
+    pub(crate) use alloc::{
+        borrow::Cow,
+        boxed::Box,
+        format,
+        string::{String, ToString},
+        vec::Vec,
+    };
+    #[cfg(feature = "std")]
+    pub(crate) use std::{
+        borrow::Cow,
+        boxed::Box,
+        format,
+        string::{String, ToString},
+        vec::Vec,
+    };
+}
+
+mod color;
+mod style;
+mod tags;
+pub mod terminal;
+pub mod text;
+mod theme;
+
 #[cfg(feature = "std")]
 mod app;
 #[cfg(feature = "std")]
 mod arg;
 #[cfg(feature = "auth")]
 mod auth;
-#[cfg(feature = "std")]
-mod color;
 #[cfg(feature = "std")]
 mod command;
 #[cfg(feature = "std")]
@@ -111,17 +201,19 @@ mod matches;
 mod output;
 #[cfg(feature = "std")]
 mod parser;
+// The named-style store is process-global, which needs a lock; without `std`
+// there is none, so styles are held and passed as values instead.
 #[cfg(feature = "std")]
 mod registry;
-#[cfg(feature = "std")]
-mod style;
-#[cfg(feature = "std")]
-mod tags;
-#[cfg(feature = "std")]
-mod terminal;
 
 #[cfg(all(test, feature = "color"))]
 mod crosspath_tests;
+
+pub use crate::color::Color;
+pub use crate::style::{Painted, Style, style};
+pub use crate::tags::{markup, markup_at};
+pub use crate::terminal::{ColorChoice, ColorLevel, Stream};
+pub use crate::theme::{Glyphs, Level, Theme};
 
 #[cfg(feature = "std")]
 pub use crate::app::App;
@@ -136,10 +228,8 @@ pub use crate::error::ParseError;
 #[cfg(feature = "std")]
 pub use crate::matches::Matches;
 #[cfg(feature = "std")]
-pub use crate::output::{err, out};
+pub use crate::output::{err, out, write_to};
 #[cfg(feature = "std")]
-pub use crate::registry::{Tag, define_tag, tag};
+pub use crate::registry::{define, defined, named};
 #[cfg(feature = "std")]
-pub use crate::style::{Style, style};
-#[cfg(feature = "std")]
-pub use crate::tags::parse;
+pub use crate::theme::{debug, fail, hint, info, note, ok, trace, warn};
