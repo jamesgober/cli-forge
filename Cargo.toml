@@ -88,7 +88,7 @@ terminal_size = { version = "0.4", optional = true }
 # the enable call (SetConsoleMode) requires FFI. Pulled in only by the `color`
 # feature on Windows targets.
 [target.'cfg(windows)'.dependencies]
-enable-ansi-support = { version = "0.2", optional = true }
+enable-ansi-support = { version = "0.3", optional = true }
 
 
 # DEV DEPENDENCIES

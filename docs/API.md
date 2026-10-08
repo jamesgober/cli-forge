@@ -264,6 +264,22 @@ hand-maintained description of the same CLI.
 style, text, markup, themes — on `alloc` alone, for a sink whose capability the
 caller declares with `terminal::set_level`.
 
+**Dependencies.** With the defaults, two direct ones, both narrow:
+`unicode-width` (data tables, no unsafe, no dependencies of its own) and
+`terminal_size` (which needs FFI, and is isolated there because this crate's root
+is `#![forbid(unsafe_code)]`). On Windows the `color` feature adds
+`enable-ansi-support`, for the same reason. Turning `unicode` and `termsize` off
+leaves a crate with **no dependencies at all**:
+
+```
+cli-forge                      # --no-default-features --features std,color
+├── terminal_size              # feature: termsize
+│   └── rustix                 #   (windows-sys on Windows)
+├── unicode-width              # feature: unicode
+└── enable-ansi-support        # feature: color, Windows only
+    └── windows-sys
+```
+
 ---
 
 ## Stability
