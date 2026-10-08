@@ -31,9 +31,19 @@ fn command_registered_outside_main_is_reachable_and_runs() {
     // Registration happens in `plugin`, not here.
     plugin::install(&mut app);
 
-    let matches = app.try_parse_from(["greet"]).expect("parse should succeed");
-    assert_eq!(matches.subcommand().map(|(name, _)| name), Some("greet"));
+    // `try_run_from` parses and dispatches; `try_parse_from` would only parse.
+    let outcome = app.try_run_from(["greet"]).expect("parse should succeed");
+    assert!(outcome.is_ok());
     assert_eq!(plugin::GREET_HITS.load(Ordering::SeqCst), 1);
+
+    // And the command is reachable by parsing alone, without being run.
+    let matches = app.try_parse_from(["greet"]).expect("parse should succeed");
+    assert_eq!(matches.subcommand_name(), Some("greet"));
+    assert_eq!(
+        plugin::GREET_HITS.load(Ordering::SeqCst),
+        1,
+        "parsing must not run the handler a second time"
+    );
 }
 
 #[test]
@@ -46,7 +56,7 @@ fn command_built_inline_behaves_identically() {
         counter.fetch_add(1, Ordering::SeqCst);
     }));
 
-    let matches = app.try_parse_from(["greet"]).expect("parse should succeed");
-    assert_eq!(matches.subcommand().map(|(name, _)| name), Some("greet"));
+    let outcome = app.try_run_from(["greet"]).expect("parse should succeed");
+    assert!(outcome.is_ok());
     assert_eq!(hits.load(Ordering::SeqCst), 1);
 }

@@ -1,33 +1,61 @@
 //! The application: a registry of commands and the entry point to parsing.
 //!
-//! An [`App`] holds the top-level commands and the (optional) help header and
-//! footer. Commands are added with [`register`](App::register) — from anywhere,
-//! at any point before parsing, which is the property that makes a command
-//! defined in a non-`main` module behave identically to one defined in `main`.
+//! An [`App`] holds the top-level commands, the app's own arguments, and the help
+//! text around them. Commands are added with [`register`](App::register) or
+//! [`command`](App::command) — from anywhere, at any point before parsing, which
+//! is the property that makes a command defined in a non-`main` module behave
+//! identically to one defined in `main`.
 //!
-//! [`parse`](App::parse) reads the process arguments, resolves the command,
-//! parses its arguments, and runs the selected command's handler. Malformed
-//! input is reported as a structured [`ParseError`]: [`parse`](App::parse) prints
-//! it through the output layer and exits, while
-//! [`try_parse_from`](App::try_parse_from) returns it for the caller to handle.
+//! ## Which entry point
+//!
+//! Four, because programs genuinely want different things:
+//!
+//! | Method | Parses | Runs handlers | Prints | Exits |
+//! |---|---|---|---|---|
+//! | [`run`](App::run) | process args | yes | yes | returns a code |
+//! | [`parse`](App::parse) | process args | yes | yes | yes |
+//! | [`try_run_from`](App::try_run_from) | given args | yes | no | no |
+//! | [`try_parse_from`](App::try_parse_from) | given args | no | no | no |
+//!
+//! [`run`](App::run) is the one to reach for:
+//!
+//! ```no_run
+//! use cli_forge::{App, Command, out};
+//! use std::process::ExitCode;
+//!
+//! fn main() -> ExitCode {
+//!     let mut app = App::new("forge").version(env!("CARGO_PKG_VERSION"));
+//!     app.register(Command::new("build").run(|_| out("building...")));
+//!     app.run()
+//! }
+//! ```
+//!
+//! [`try_parse_from`](App::try_parse_from) parses and nothing else, which is what
+//! makes it the one to test with: no output, no handlers, no exit — just the
+//! [`Matches`] or a [`ParseError`].
 
+use std::process::ExitCode;
+
+use crate::arg::Arg;
 use crate::command::Command;
-use crate::error::ParseError;
+use crate::error::{CommandError, ErrorKind, ParseError};
 use crate::matches::Matches;
 use crate::parser::{self, Cli};
+use crate::terminal::ColorChoice;
+use crate::theme::Theme;
 
 /// A command-line application.
 ///
-/// Build with [`App::new`], add commands with [`register`](App::register), then
-/// call [`parse`](App::parse).
+/// Build with [`App::new`], add commands, then call [`run`](App::run).
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use cli_forge::{App, Arg, Command, out};
+/// use cli_forge::{out, App, Arg, Command};
 ///
 /// let mut app = App::new("forge")
-///     .help_header("forge — project constructor")
+///     .version(env!("CARGO_PKG_VERSION"))
+///     .about("a project constructor")
 ///     .help_footer("docs: https://github.com/jamesgober/cli-forge");
 ///
 /// app.register(
@@ -37,14 +65,20 @@ use crate::parser::{self, Cli};
 ///         .run(|m| out(format!("initializing {}", m.value("name").unwrap_or("?")))),
 /// );
 ///
-/// let _matches = app.parse();
+/// let code = app.run();
 /// ```
 pub struct App {
     name: String,
     version: Option<String>,
+    about: Option<String>,
+    long_about: Option<String>,
     help_header: Option<String>,
     help_footer: Option<String>,
     commands: Vec<Command>,
+    globals: Vec<Arg>,
+    help_command: bool,
+    theme: Option<Theme>,
+    color: Option<ColorChoice>,
     #[cfg(feature = "auth")]
     auth_hook: Option<crate::auth::AuthHook>,
 }
@@ -52,69 +86,83 @@ pub struct App {
 impl App {
     /// Create an application with the given program name.
     ///
+    /// The name appears in usage lines, so it should be what the user types —
+    /// `env!("CARGO_BIN_NAME")` where that matches.
+    ///
     /// # Examples
     ///
     /// ```
     /// use cli_forge::App;
     /// let app = App::new("forge");
+    /// # let _ = app;
     /// ```
     #[must_use]
     pub fn new(name: impl Into<String>) -> App {
         App {
             name: name.into(),
             version: None,
+            about: None,
+            long_about: None,
             help_header: None,
             help_footer: None,
             commands: Vec::new(),
+            globals: Vec::new(),
+            help_command: true,
+            theme: None,
+            color: None,
             #[cfg(feature = "auth")]
             auth_hook: None,
         }
     }
 
-    /// Set the authorization hook that enforces
-    /// [`Command::requires_auth`](crate::Command::requires_auth).
-    ///
-    /// The hook receives an [`AuthRequest`](crate::AuthRequest) naming the command
-    /// being authorized and returns whether to allow it. An auth-gated command
-    /// runs only if the hook returns `true`; otherwise parsing yields
-    /// [`ParseError::Unauthorized`] and the handler does not run. Without a hook,
-    /// auth-gated commands are never authorized (the seam fails closed).
-    ///
-    /// Requires the `auth` feature.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[cfg(feature = "auth")]
-    /// # {
-    /// use cli_forge::{App, Command, ParseError};
-    ///
-    /// let mut app = App::new("demo").auth(|req| req.command() != "publish");
-    /// app.register(Command::new("publish").requires_auth(true).run(|_| {}));
-    ///
-    /// let err = app.try_parse_from(["publish"]).unwrap_err();
-    /// assert!(matches!(err, ParseError::Unauthorized { .. }));
-    /// # }
-    /// ```
-    #[cfg(feature = "auth")]
-    #[must_use]
-    pub fn auth(mut self, hook: impl Fn(&crate::auth::AuthRequest<'_>) -> bool + 'static) -> App {
-        self.auth_hook = Some(Box::new(hook));
-        self
-    }
-
     /// Set the version reported by `-V` / `--version`.
     ///
-    /// Without this, the version flags are treated as ordinary unknown flags.
-    /// A common idiom is to pass the crate version:
+    /// Without this, the version flags are ordinary unknown flags. The usual
+    /// idiom is to take it from the manifest so the two cannot drift:
     ///
     /// ```
     /// use cli_forge::App;
     /// let app = App::new("forge").version(env!("CARGO_PKG_VERSION"));
+    /// # let _ = app;
     /// ```
     #[must_use]
     pub fn version(mut self, version: impl Into<String>) -> App {
         self.version = Some(version.into());
+        self
+    }
+
+    /// Set the one-line description shown at the top of the app's help.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::App;
+    ///
+    /// let app = App::new("forge").about("a project constructor");
+    /// assert!(app.help().contains("a project constructor"));
+    /// ```
+    #[must_use]
+    pub fn about(mut self, text: impl Into<String>) -> App {
+        self.about = Some(text.into());
+        self
+    }
+
+    /// Set the fuller description shown on the app's help page in place of
+    /// [`about`](App::about), wrapped to the terminal.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::App;
+    ///
+    /// let app = App::new("forge")
+    ///     .about("a project constructor")
+    ///     .long_about("Builds, tests, and publishes projects described by a forge.toml.");
+    /// assert!(app.help().contains("forge.toml"));
+    /// ```
+    #[must_use]
+    pub fn long_about(mut self, text: impl Into<String>) -> App {
+        self.long_about = Some(text.into());
         self
     }
 
@@ -125,6 +173,7 @@ impl App {
     /// ```
     /// use cli_forge::App;
     /// let app = App::new("forge").help_header("forge — project constructor");
+    /// # let _ = app;
     /// ```
     #[must_use]
     pub fn help_header(mut self, text: impl Into<String>) -> App {
@@ -139,6 +188,7 @@ impl App {
     /// ```
     /// use cli_forge::App;
     /// let app = App::new("forge").help_footer("see the docs for more");
+    /// # let _ = app;
     /// ```
     #[must_use]
     pub fn help_footer(mut self, text: impl Into<String>) -> App {
@@ -146,12 +196,83 @@ impl App {
         self
     }
 
+    /// Accept an argument at the app level, before any command name.
+    ///
+    /// Mark it [`global`](Arg::global) to have every subcommand accept it too,
+    /// written on either side of the command name — which is what `--verbose`
+    /// and `--color` want to be.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("forge")
+    ///     .arg(Arg::count("verbose").short('v').global(true))
+    ///     .arg(Arg::option("config").short('c').global(true));
+    /// app.register(Command::new("build"));
+    ///
+    /// let m = app.try_parse_from(["-vv", "build", "-c", "forge.toml"]).unwrap();
+    /// assert_eq!(m.count("verbose"), 2);
+    /// assert_eq!(m.leaf().value("config"), Some("forge.toml"));
+    /// ```
+    #[must_use]
+    pub fn arg(mut self, arg: Arg) -> App {
+        self.globals.push(arg);
+        self
+    }
+
+    /// Accept several app-level arguments at once.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg};
+    ///
+    /// let app = App::new("forge").args([
+    ///     Arg::count("verbose").short('v').global(true),
+    ///     Arg::flag("quiet").short('q').global(true),
+    /// ]);
+    /// # let _ = app;
+    /// ```
+    #[must_use]
+    pub fn args<I>(mut self, args: I) -> App
+    where
+        I: IntoIterator<Item = Arg>,
+    {
+        self.globals.extend(args);
+        self
+    }
+
+    /// Add a top-level command, chaining.
+    ///
+    /// The builder-style counterpart of [`register`](App::register), for the
+    /// common case where the whole app is one expression.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let app = App::new("forge")
+    ///     .command(Command::new("build").about("compile the project"))
+    ///     .command(Command::new("test").about("run the tests"));
+    ///
+    /// assert_eq!(app.commands().len(), 2);
+    /// ```
+    #[must_use]
+    pub fn command(mut self, cmd: Command) -> App {
+        self.commands.push(cmd);
+        self
+    }
+
     /// Register a top-level command.
     ///
     /// Call this from anywhere with access to the `App` — a different module, a
-    /// plugin's setup function, a loop over a config — at any point before
+    /// plugin's setup function, a loop over a config file — at any point before
     /// parsing. A command registered outside `main` is reachable and behaves
-    /// identically to one registered in `main`.
+    /// identically to one registered in `main`, which is what lets each command
+    /// live beside the code it drives.
     ///
     /// # Examples
     ///
@@ -166,47 +287,189 @@ impl App {
         self.commands.push(cmd);
     }
 
-    /// Parse the process arguments, run the selected command's handler, and
-    /// return the [`Matches`].
+    /// Whether to accept `prog help [command]`, and to show the help when the
+    /// program is run with no arguments at all. On by default.
     ///
-    /// `-h` / `--help` and `-V` / `--version` are handled here: the rendered help
-    /// or version is printed to standard output and the process exits `0`. On
-    /// malformed input the structured [`ParseError`] is printed to standard error
-    /// and the process exits `2`. This never panics. For a non-exiting variant —
-    /// for embedding or tests — use [`try_parse_from`](App::try_parse_from).
+    /// Both are what users expect; turn it off for a program whose bare
+    /// invocation is meaningful, or that declares its own `help`.
     ///
     /// # Examples
     ///
-    /// ```no_run
-    /// use cli_forge::{App, Command, out};
+    /// ```
+    /// use cli_forge::{App, Command, ErrorKind};
     ///
-    /// let mut app = App::new("demo").version(env!("CARGO_PKG_VERSION"));
-    /// app.register(Command::new("hello").run(|_| out("hello")));
-    /// let _matches = app.parse();
+    /// let mut app = App::new("demo");
+    /// app.register(Command::new("build"));
+    ///
+    /// // `help build` renders that command's page.
+    /// let err = app.try_parse_from(["help", "build"]).unwrap_err();
+    /// assert_eq!(err.kind(), ErrorKind::HelpRequested);
+    /// assert!(err.text().unwrap().contains("demo build"));
+    ///
+    /// // And a bare invocation shows the app help rather than doing nothing.
+    /// let bare = app.try_parse_from([] as [&str; 0]).unwrap_err();
+    /// assert_eq!(bare.kind(), ErrorKind::HelpRequested);
+    ///
+    /// // Unless the program says otherwise.
+    /// let quiet = App::new("demo").help_command(false).command(Command::new("build"));
+    /// assert!(quiet.try_parse_from([] as [&str; 0]).is_ok());
     /// ```
     #[must_use]
-    pub fn parse(&self) -> Matches {
-        let args: Vec<String> = std::env::args().skip(1).collect();
-        match self.try_parse_from(args) {
-            Ok(matches) => matches,
-            Err(ParseError::HelpRequested(text) | ParseError::VersionRequested(text)) => {
-                crate::out(text);
-                std::process::exit(0);
-            }
-            Err(error) => {
-                crate::err(format_args!("error: {error}"));
-                std::process::exit(2);
-            }
-        }
+    pub fn help_command(mut self, enabled: bool) -> App {
+        self.help_command = enabled;
+        self
+    }
+
+    /// Use `theme` for this app's own output: its help, its errors, and every
+    /// themed printer the program calls.
+    ///
+    /// Installed as the process default when parsing begins, so the builder
+    /// itself stays free of side effects.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command, Glyphs, Theme};
+    ///
+    /// let mut app = App::new("demo").theme(Theme::new().glyphs(Glyphs::Ascii));
+    /// app.register(Command::new("build"));
+    /// let _ = app.try_parse_from(["build"]);
+    /// # Theme::new().install();
+    /// ```
+    #[must_use]
+    pub fn theme(mut self, theme: Theme) -> App {
+        self.theme = Some(theme);
+        self
+    }
+
+    /// Decide this app's colour output, overriding detection.
+    ///
+    /// What a `--color` flag parses into. Applied when parsing begins, so help
+    /// and errors honour it too.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, ColorChoice, Command};
+    ///
+    /// let mut app = App::new("demo").color(ColorChoice::Never);
+    /// app.register(Command::new("build"));
+    /// let _ = app.try_parse_from(["build"]);
+    /// # cli_forge::terminal::set_color_choice(ColorChoice::Auto);
+    /// ```
+    #[must_use]
+    pub fn color(mut self, choice: ColorChoice) -> App {
+        self.color = Some(choice);
+        self
+    }
+
+    /// Set the authorization hook that enforces
+    /// [`Command::requires_auth`](crate::Command::requires_auth).
+    ///
+    /// The hook receives an [`AuthRequest`](crate::AuthRequest) naming the command
+    /// being authorized and returns whether to allow it. An auth-gated command
+    /// runs only if the hook returns `true`; otherwise parsing yields
+    /// [`ErrorKind::Unauthorized`] and the handler does not run. Without a hook,
+    /// auth-gated commands are never authorized — the seam fails closed, because
+    /// the alternative is a gate that silently opens when nobody wired it up.
+    ///
+    /// Requires the `auth` feature.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "auth")]
+    /// # {
+    /// use cli_forge::{App, Command, ErrorKind};
+    ///
+    /// let mut app = App::new("demo").auth(|req| req.command() != "publish");
+    /// app.register(Command::new("publish").requires_auth(true).run(|_| {}));
+    ///
+    /// let err = app.try_run_from(["publish"]).unwrap_err();
+    /// assert_eq!(err.kind(), ErrorKind::Unauthorized);
+    /// # }
+    /// ```
+    #[cfg(feature = "auth")]
+    #[must_use]
+    pub fn auth(mut self, hook: impl Fn(&crate::auth::AuthRequest<'_>) -> bool + 'static) -> App {
+        self.auth_hook = Some(Box::new(hook));
+        self
+    }
+
+    /// This app's program name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::App;
+    /// assert_eq!(App::new("forge").name(), "forge");
+    /// ```
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// This app's version, if one was set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::App;
+    /// assert_eq!(App::new("forge").version("1.2.3").version_text(), Some("1.2.3"));
+    /// ```
+    #[must_use]
+    pub fn version_text(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    /// The registered top-level commands, in registration order.
+    ///
+    /// The root of the read-only view a sibling crate walks to generate shell
+    /// completions, manual pages, or documentation from the live command tree
+    /// rather than from a second description of it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let app = App::new("forge")
+    ///     .command(Command::new("build").arg(Arg::flag("release")));
+    ///
+    /// // Exactly what a completion generator needs.
+    /// for command in app.commands() {
+    ///     for arg in command.arguments() {
+    ///         let _ = (arg.long_form(), arg.expects_value(), arg.allowed_values());
+    ///     }
+    /// }
+    /// assert_eq!(app.commands()[0].name(), "build");
+    /// ```
+    #[must_use]
+    pub fn commands(&self) -> &[Command] {
+        &self.commands
+    }
+
+    /// The app-level arguments, in declaration order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg};
+    ///
+    /// let app = App::new("forge").arg(Arg::count("verbose").global(true));
+    /// assert!(app.global_arguments()[0].is_global());
+    /// ```
+    #[must_use]
+    pub fn global_arguments(&self) -> &[Arg] {
+        &self.globals
     }
 
     /// Render the top-level help as a string.
     ///
-    /// Useful for printing help on demand — for example, when no command was
-    /// given:
+    /// # Examples
     ///
     /// ```
-    /// use cli_forge::{App, Command, out};
+    /// use cli_forge::{App, Command};
     ///
     /// let mut app = App::new("demo");
     /// app.register(Command::new("build").about("compile the project"));
@@ -220,16 +483,64 @@ impl App {
         crate::help::render_app(&self.cli())
     }
 
-    /// Parse an explicit argument list (excluding the program name), run the
-    /// selected command's handler, and return the [`Matches`] — or a structured
-    /// [`ParseError`] on malformed input. Never exits the process; never panics.
+    /// Render one command's help as a string, or `None` if `path` names no
+    /// command.
     ///
-    /// This is the testable, embeddable counterpart to [`parse`](App::parse).
+    /// `path` is the chain of command names from the app down, so a nested
+    /// command's page is reachable without re-deriving the tree.
     ///
     /// # Examples
     ///
     /// ```
-    /// use cli_forge::{App, Arg, Command, ParseError};
+    /// use cli_forge::{App, Command};
+    ///
+    /// let mut app = App::new("forge");
+    /// app.register(
+    ///     Command::new("remote")
+    ///         .subcommand(Command::new("add").about("add a remote")),
+    /// );
+    ///
+    /// let help = app.command_help(["remote", "add"]).unwrap();
+    /// assert!(help.contains("forge remote add"));
+    /// assert!(help.contains("add a remote"));
+    /// assert!(app.command_help(["nope"]).is_none());
+    /// ```
+    #[must_use]
+    pub fn command_help<I, S>(&self, path: I) -> Option<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let wanted: Vec<String> = path
+            .into_iter()
+            .map(|name| name.as_ref().to_owned())
+            .collect();
+        let mut names: Vec<&str> = Vec::with_capacity(wanted.len());
+        let mut current: Option<&Command> = None;
+
+        for name in &wanted {
+            let next = match current {
+                None => self.commands.iter().find(|c| c.matches_name(name)),
+                Some(command) => command.find_subcommand(name),
+            }?;
+            names.push(next.name.as_str());
+            current = Some(next);
+        }
+        let command = current?;
+        Some(crate::help::render_command(&self.cli(), &names, command))
+    }
+
+    /// Parse an explicit argument list, excluding the program name.
+    ///
+    /// Parses and nothing else: no output, no handlers, no exit. That is what
+    /// makes it the one to test with, and it is the one behaviour change from 1.x
+    /// worth noting — the old version ran handlers as a side effect of parsing.
+    /// Use [`try_run_from`](App::try_run_from) when handlers should run.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command, ErrorKind};
     ///
     /// let mut app = App::new("demo");
     /// app.register(Command::new("build").arg(Arg::option("jobs").short('j')));
@@ -238,31 +549,192 @@ impl App {
     /// let matches = app.try_parse_from(["build", "-j", "4"]).unwrap();
     /// assert_eq!(matches.subcommand().unwrap().1.value("jobs"), Some("4"));
     ///
-    /// // Malformed input returns a structured error.
+    /// // Malformed input returns a structured error, and never panics.
     /// let err = app.try_parse_from(["build", "--bogus"]).unwrap_err();
-    /// assert!(matches!(err, ParseError::UnknownFlag { .. }));
+    /// assert_eq!(err.kind(), ErrorKind::UnknownFlag);
     /// ```
     pub fn try_parse_from<I, S>(&self, args: I) -> Result<Matches, ParseError>
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        self.apply_presentation();
         let tokens: Vec<String> = args.into_iter().map(Into::into).collect();
         let matches = parser::parse_app(&self.cli(), &tokens)?;
         #[cfg(feature = "auth")]
         self.enforce_auth(&matches)?;
-        self.dispatch(&matches);
         Ok(matches)
+    }
+
+    /// Parse an explicit argument list and run the selected command's handler.
+    ///
+    /// The outer `Result` is about the command line; the inner one is about the
+    /// work. Keeping them apart is the point: a bad invocation and a failed
+    /// command deserve different messages and different exit codes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let mut app = App::new("demo");
+    /// app.register(Command::new("ok").run(|_| {}));
+    /// app.register(Command::new("bad").run(|_| Err("it broke")));
+    ///
+    /// assert!(app.try_run_from(["ok"]).unwrap().is_ok());
+    ///
+    /// let failure = app.try_run_from(["bad"]).unwrap().unwrap_err();
+    /// assert_eq!(failure.message(), "it broke");
+    ///
+    /// // A bad invocation never reaches a handler at all.
+    /// assert!(app.try_run_from(["nope"]).is_err());
+    /// ```
+    pub fn try_run_from<I, S>(&self, args: I) -> Result<Result<(), CommandError>, ParseError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let matches = self.try_parse_from(args)?;
+        Ok(self.dispatch(&matches))
+    }
+
+    /// Run the handler of the deepest command `matches` resolved to.
+    ///
+    /// For a program that parses and dispatches in separate steps — to inspect or
+    /// adjust the `Matches` in between, or to decide not to run at all.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let mut app = App::new("demo");
+    /// app.register(Command::new("build").run(|_| {}));
+    ///
+    /// let matches = app.try_parse_from(["build"]).unwrap();
+    /// assert!(app.dispatch(&matches).is_ok());
+    /// ```
+    pub fn dispatch(&self, matches: &Matches) -> Result<(), CommandError> {
+        let Some((name, sub)) = matches.subcommand() else {
+            return Ok(());
+        };
+        let Some(command) = self.commands.iter().find(|c| c.name == name) else {
+            return Ok(());
+        };
+        dispatch_command(command, sub)
+    }
+
+    /// Parse the process arguments, run the selected command, and report the
+    /// outcome as an exit status.
+    ///
+    /// Everything a `main` needs: help and version are printed to standard output
+    /// and reported as success; a bad command line is reported to standard error
+    /// with its suggestion and usage line, as status `2`; a failed command prints
+    /// its message and its own status. Nothing panics, and nothing is left for
+    /// the caller to arrange.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cli_forge::{App, Command, out};
+    /// use std::process::ExitCode;
+    ///
+    /// fn main() -> ExitCode {
+    ///     let mut app = App::new("forge").version(env!("CARGO_PKG_VERSION"));
+    ///     app.register(Command::new("build").run(|_| out("building...")));
+    ///     app.run()
+    /// }
+    /// ```
+    #[must_use]
+    pub fn run(&self) -> ExitCode {
+        let args = match process_args() {
+            Ok(args) => args,
+            Err(error) => return self.report(&error),
+        };
+        match self.try_run_from(args) {
+            Ok(Ok(())) => ExitCode::SUCCESS,
+            Ok(Err(failure)) => {
+                crate::theme::emit(crate::theme::Level::Error, failure.message());
+                exit_code(failure.exit_code())
+            }
+            Err(error) => self.report(&error),
+        }
+    }
+
+    /// Parse the process arguments, run the selected command's handler, and
+    /// return the [`Matches`].
+    ///
+    /// Prints and exits on anything that stops parsing: help and version to
+    /// standard output with status `0`, a bad command line to standard error with
+    /// status `2`. Prefer [`run`](App::run), which reports the same outcomes
+    /// without taking the exit decision away from `main`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cli_forge::{App, Command, out};
+    ///
+    /// let mut app = App::new("demo").version(env!("CARGO_PKG_VERSION"));
+    /// app.register(Command::new("hello").run(|_| out("hello")));
+    /// let matches = app.parse();
+    /// # let _ = matches;
+    /// ```
+    #[must_use]
+    pub fn parse(&self) -> Matches {
+        let args = match process_args() {
+            Ok(args) => args,
+            Err(error) => {
+                let _ = self.report(&error);
+                std::process::exit(error.exit_code());
+            }
+        };
+        match self.try_parse_from(args) {
+            Ok(matches) => {
+                if let Err(failure) = self.dispatch(&matches) {
+                    crate::theme::emit(crate::theme::Level::Error, failure.message());
+                    std::process::exit(failure.exit_code());
+                }
+                matches
+            }
+            Err(error) => {
+                let _ = self.report(&error);
+                std::process::exit(error.exit_code());
+            }
+        }
+    }
+
+    /// Print `error`'s report to the stream it belongs on, and report its status.
+    fn report(&self, error: &ParseError) -> ExitCode {
+        crate::output::write_line(error.stream(), &error.styled_report());
+        exit_code(error.exit_code())
+    }
+
+    /// Install the theme and colour choice this app asked for, if any.
+    ///
+    /// Done here rather than in the builder so that constructing an `App` has no
+    /// side effects, while help and errors still render through the program's own
+    /// theme.
+    fn apply_presentation(&self) {
+        if let Some(choice) = self.color {
+            crate::terminal::set_color_choice(choice);
+        }
+        if let Some(theme) = &self.theme {
+            theme.clone().install();
+        }
     }
 
     /// Assemble the borrowed context the parser and help engine need.
     fn cli(&self) -> Cli<'_> {
         Cli {
             app_name: &self.name,
+            about: self.about.as_deref(),
+            long_about: self.long_about.as_deref(),
             header: self.help_header.as_deref(),
             footer: self.help_footer.as_deref(),
             version: self.version.as_deref(),
             commands: &self.commands,
+            globals: &self.globals,
+            help_command: self.help_command,
             #[cfg(feature = "auth")]
             authorizer: self.auth_hook.as_ref(),
         }
@@ -272,22 +744,21 @@ impl App {
     /// authorize it. Fails closed when no hook is set.
     #[cfg(feature = "auth")]
     fn enforce_auth(&self, matches: &Matches) -> Result<(), ParseError> {
-        if let Some((path, leaf)) = self.resolve_path(matches) {
-            if leaf.requires_auth {
-                let request = crate::auth::AuthRequest::new(&path);
-                let authorized = self.auth_hook.as_ref().is_some_and(|hook| hook(&request));
-                if !authorized {
-                    return Err(ParseError::Unauthorized {
-                        command: leaf.name.clone(),
-                    });
-                }
-            }
+        let Some((path, leaf)) = self.resolve_path(matches) else {
+            return Ok(());
+        };
+        if !leaf.requires_auth {
+            return Ok(());
         }
-        Ok(())
+        let request = crate::auth::AuthRequest::new(&path);
+        if self.auth_hook.as_ref().is_some_and(|hook| hook(&request)) {
+            return Ok(());
+        }
+        Err(ParseError::new(ErrorKind::Unauthorized, &leaf.name))
     }
 
     /// Walk the resolved subcommand chain, returning the command-name path and
-    /// the deepest (leaf) command.
+    /// the deepest command.
     #[cfg(feature = "auth")]
     fn resolve_path(&self, matches: &Matches) -> Option<(Vec<&str>, &Command)> {
         let (name, mut sub) = matches.subcommand()?;
@@ -300,22 +771,6 @@ impl App {
         }
         Some((path, command))
     }
-
-    /// Run the handler of the deepest command the parse resolved to.
-    fn dispatch(&self, matches: &Matches) {
-        if let Some((name, sub)) = matches.subcommand() {
-            if let Some(command) = self.commands.iter().find(|c| c.name == name) {
-                dispatch_command(command, sub);
-            }
-        }
-    }
-
-    /// The registered commands that are not hidden. Used in tests to verify
-    /// hidden commands are excluded from listings.
-    #[cfg(test)]
-    pub(crate) fn visible_commands(&self) -> impl Iterator<Item = &Command> {
-        self.commands.iter().filter(|c| !c.hidden)
-    }
 }
 
 impl std::fmt::Debug for App {
@@ -326,523 +781,60 @@ impl std::fmt::Debug for App {
         let mut s = f.debug_struct("App");
         s.field("name", &self.name);
         s.field("version", &self.version);
+        s.field("about", &self.about);
         s.field("help_header", &self.help_header);
         s.field("help_footer", &self.help_footer);
         s.field("commands", &self.commands);
+        s.field("globals", &self.globals);
+        s.field("help_command", &self.help_command);
         #[cfg(feature = "auth")]
         s.field("has_auth_hook", &self.auth_hook.is_some());
         s.finish()
     }
 }
 
+/// The process arguments as strings, excluding the program name.
+///
+/// `std::env::args` panics on an argument that is not valid UTF-8, which on both
+/// Windows and Unix is something a user can cause from the shell — so this reads
+/// the raw form and reports the problem instead. A program that must handle such
+/// arguments can read `args_os` itself and decide.
+fn process_args() -> Result<Vec<String>, ParseError> {
+    let mut args = Vec::new();
+    for raw in std::env::args_os().skip(1) {
+        match raw.into_string() {
+            Ok(arg) => args.push(arg),
+            Err(lossy) => {
+                return Err(ParseError::new(
+                    ErrorKind::NonUtf8,
+                    lossy.to_string_lossy().into_owned(),
+                )
+                .with_detail("arguments must be valid UTF-8".to_owned()));
+            }
+        }
+    }
+    Ok(args)
+}
+
+/// Map an exit status onto the byte a process can actually return, keeping a
+/// failure a failure rather than letting it wrap around to success.
+fn exit_code(code: i32) -> ExitCode {
+    match u8::try_from(code) {
+        Ok(0) if code != 0 => ExitCode::FAILURE,
+        Ok(byte) => ExitCode::from(byte),
+        Err(_) => ExitCode::FAILURE,
+    }
+}
+
 /// Walk to the leaf of the resolved path and run its handler, if any.
-fn dispatch_command(command: &Command, matches: &Matches) {
+fn dispatch_command(command: &Command, matches: &Matches) -> Result<(), CommandError> {
     if let Some((name, sub)) = matches.subcommand() {
         if let Some(child) = command.find_subcommand(name) {
-            dispatch_command(child, sub);
-            return;
+            return dispatch_command(child, sub);
         }
     }
-    if let Some(handler) = &command.handler {
-        handler(matches);
-    }
+    command.invoke(matches)
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use super::*;
-    use crate::arg::Arg;
-
-    #[test]
-    fn test_unknown_command_is_structured_error() {
-        let app = App::new("demo");
-        let err = app.try_parse_from(["nope"]).unwrap_err();
-        assert_eq!(
-            err,
-            ParseError::UnknownCommand {
-                name: "nope".into()
-            }
-        );
-    }
-
-    #[test]
-    fn test_empty_args_yield_no_subcommand() {
-        let app = App::new("demo");
-        let matches = app.try_parse_from(Vec::<String>::new()).unwrap();
-        assert!(matches.subcommand().is_none());
-    }
-
-    #[test]
-    fn test_hidden_command_is_invokable_but_not_listed() {
-        let mut app = App::new("demo");
-        app.register(Command::new("secret").hidden(true));
-        app.register(Command::new("visible"));
-
-        // Still invokable.
-        let matches = app.try_parse_from(["secret"]).unwrap();
-        assert_eq!(matches.subcommand().map(|(name, _)| name), Some("secret"));
-
-        // Absent from the visible listing the help engine will render.
-        let listed: Vec<&str> = app.visible_commands().map(|c| c.name.as_str()).collect();
-        assert!(listed.contains(&"visible"));
-        assert!(!listed.contains(&"secret"));
-    }
-
-    #[test]
-    fn test_handler_runs_for_selected_command_only() {
-        static INIT_HITS: AtomicUsize = AtomicUsize::new(0);
-        static OTHER_HITS: AtomicUsize = AtomicUsize::new(0);
-
-        let mut app = App::new("demo");
-        app.register(Command::new("init").run(|_| {
-            let _ = INIT_HITS.fetch_add(1, Ordering::SeqCst);
-        }));
-        app.register(Command::new("other").run(|_| {
-            let _ = OTHER_HITS.fetch_add(1, Ordering::SeqCst);
-        }));
-
-        let _ = app.try_parse_from(["init"]).unwrap();
-        assert_eq!(INIT_HITS.load(Ordering::SeqCst), 1);
-        assert_eq!(OTHER_HITS.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn test_nested_subcommand_dispatch() {
-        static ADD_HITS: AtomicUsize = AtomicUsize::new(0);
-
-        let mut app = App::new("demo");
-        app.register(
-            Command::new("remote")
-                .subcommand(Command::new("add").run(|_| {
-                    let _ = ADD_HITS.fetch_add(1, Ordering::SeqCst);
-                }))
-                .subcommand(Command::new("remove")),
-        );
-
-        let matches = app.try_parse_from(["remote", "add"]).unwrap();
-        let (_, remote) = matches.subcommand().unwrap();
-        assert_eq!(remote.subcommand().map(|(name, _)| name), Some("add"));
-        assert_eq!(ADD_HITS.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn test_missing_required_argument() {
-        let mut app = App::new("demo");
-        app.register(Command::new("greet").arg(Arg::positional("name").required(true)));
-        let err = app.try_parse_from(["greet"]).unwrap_err();
-        assert_eq!(err, ParseError::MissingRequired { arg: "name".into() });
-    }
-
-    #[cfg(not(feature = "auth"))]
-    #[test]
-    fn test_requires_auth_is_inert_without_auth_feature() {
-        let mut app = App::new("demo");
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        app.register(Command::new("publish").requires_auth(true).run(|_| {
-            let _ = RAN.fetch_add(1, Ordering::SeqCst);
-        }));
-        // Without the `auth` feature the flag does nothing: the command runs.
-        let _ = app.try_parse_from(["publish"]).unwrap();
-        assert_eq!(RAN.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn test_combined_short_flags_and_attached_option_value() {
-        let mut app = App::new("demo");
-        app.register(
-            Command::new("run")
-                .arg(Arg::flag("all").short('a'))
-                .arg(Arg::flag("verbose").short('v'))
-                .arg(Arg::option("output").short('o')),
-        );
-        // `-av` bundles two flags; `-ofile` attaches the option value.
-        let matches = app.try_parse_from(["run", "-av", "-ofile"]).unwrap();
-        let (_, run) = matches.subcommand().unwrap();
-        assert!(run.flag("all"));
-        assert!(run.flag("verbose"));
-        assert_eq!(run.value("output"), Some("file"));
-    }
-
-    #[test]
-    fn test_end_of_options_marker_treats_rest_as_positional() {
-        let mut app = App::new("demo");
-        app.register(Command::new("echo").arg(Arg::positional("text")));
-        let matches = app.try_parse_from(["echo", "--", "--not-a-flag"]).unwrap();
-        assert_eq!(
-            matches.subcommand().unwrap().1.value("text"),
-            Some("--not-a-flag")
-        );
-    }
-
-    #[test]
-    fn test_count_flag_bundled_separate_and_long() {
-        let mut app = App::new("demo");
-        app.register(Command::new("run").arg(Arg::count("verbose").short('v')));
-
-        let bundled = app.try_parse_from(["run", "-vvv"]).unwrap();
-        assert_eq!(bundled.subcommand().unwrap().1.count("verbose"), 3);
-
-        let mixed = app
-            .try_parse_from(["run", "-v", "-vv", "--verbose"])
-            .unwrap();
-        let (_, run) = mixed.subcommand().unwrap();
-        assert_eq!(run.count("verbose"), 4);
-        assert!(run.flag("verbose")); // flag() is true once counted
-    }
-
-    #[test]
-    fn test_count_flag_absent_is_zero() {
-        let mut app = App::new("demo");
-        app.register(Command::new("run").arg(Arg::count("verbose").short('v')));
-        let m = app.try_parse_from(["run"]).unwrap();
-        let (_, run) = m.subcommand().unwrap();
-        assert_eq!(run.count("verbose"), 0);
-        assert!(!run.flag("verbose"));
-    }
-
-    #[test]
-    fn test_repeatable_option_collects_every_form() {
-        let mut app = App::new("cc");
-        app.register(Command::new("build").arg(Arg::option("define").short('D').multiple(true)));
-        // long, long=, short-space, short-attached — all append in order.
-        let m = app
-            .try_parse_from(["build", "--define", "A", "--define=B", "-D", "C", "-DD"])
-            .unwrap();
-        let (_, build) = m.subcommand().unwrap();
-        assert_eq!(
-            build.values("define").collect::<Vec<_>>(),
-            ["A", "B", "C", "D"]
-        );
-        assert_eq!(build.value("define"), Some("A")); // value() is the first
-    }
-
-    #[test]
-    fn test_single_option_is_last_wins() {
-        let mut app = App::new("demo");
-        app.register(Command::new("run").arg(Arg::option("out").short('o')));
-        let m = app.try_parse_from(["run", "-o", "a", "-o", "b"]).unwrap();
-        let (_, run) = m.subcommand().unwrap();
-        assert_eq!(run.value("out"), Some("b"));
-        assert_eq!(run.values("out").collect::<Vec<_>>(), ["b"]);
-    }
-
-    #[test]
-    fn test_variadic_positional_slurps_remaining() {
-        let mut app = App::new("demo");
-        app.register(Command::new("rm").arg(Arg::positional("files").multiple(true)));
-        let m = app.try_parse_from(["rm", "a", "b", "c"]).unwrap();
-        assert_eq!(
-            m.subcommand()
-                .unwrap()
-                .1
-                .values("files")
-                .collect::<Vec<_>>(),
-            ["a", "b", "c"]
-        );
-    }
-
-    #[test]
-    fn test_fixed_then_variadic_positional() {
-        let mut app = App::new("demo");
-        app.register(
-            Command::new("cp")
-                .arg(Arg::positional("dest").required(true))
-                .arg(Arg::positional("sources").multiple(true)),
-        );
-        let m = app.try_parse_from(["cp", "target", "a", "b"]).unwrap();
-        let (_, cp) = m.subcommand().unwrap();
-        assert_eq!(cp.value("dest"), Some("target"));
-        assert_eq!(cp.values("sources").collect::<Vec<_>>(), ["a", "b"]);
-    }
-
-    #[test]
-    fn test_required_variadic_needs_at_least_one() {
-        let mut app = App::new("demo");
-        app.register(
-            Command::new("rm").arg(Arg::positional("files").multiple(true).required(true)),
-        );
-        let err = app.try_parse_from(["rm"]).unwrap_err();
-        assert_eq!(
-            err,
-            ParseError::MissingRequired {
-                arg: "files".into()
-            }
-        );
-
-        let ok = app.try_parse_from(["rm", "x"]).unwrap();
-        assert_eq!(
-            ok.subcommand()
-                .unwrap()
-                .1
-                .values("files")
-                .collect::<Vec<_>>(),
-            ["x"]
-        );
-    }
-
-    #[test]
-    fn test_values_empty_for_absent_and_unknown() {
-        let mut app = App::new("demo");
-        app.register(Command::new("run").arg(Arg::option("x")));
-        let m = app.try_parse_from(["run"]).unwrap();
-        let (_, run) = m.subcommand().unwrap();
-        assert_eq!(run.values("x").count(), 0);
-        assert_eq!(run.values("nope").count(), 0);
-        assert_eq!(run.value("nope"), None);
-    }
-
-    /// A rendered page with its ANSI escapes removed. Section headings are
-    /// styled, so a raw page only reads as plain text when the test process
-    /// happens to have a color-incapable stdout — assertions that span a
-    /// heading boundary must go through this.
-    fn plain(text: &str) -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut rest = text;
-        while let Some(start) = rest.find('\x1b') {
-            out.push_str(&rest[..start]);
-            rest = match rest[start..].find('m') {
-                Some(end) => &rest[start + end + 1..],
-                None => "",
-            };
-        }
-        out.push_str(rest);
-        out
-    }
-
-    fn help_demo() -> App {
-        let mut app = App::new("demo")
-            .version("1.0.0")
-            .help_header("HEADER LINE")
-            .help_footer("FOOTER LINE");
-        app.register(Command::new("build").about("compile the project"));
-        app.register(
-            Command::new("remove")
-                .aliases(["rm", "del"])
-                .about("delete a thing"),
-        );
-        app.register(Command::new("secret").hidden(true).about("do not show me"));
-        app.register(Command::new("publish").requires_auth(true).about("gated"));
-        app
-    }
-
-    #[test]
-    fn test_help_respects_header_footer_and_lists_options() {
-        let help = plain(&help_demo().help());
-        assert!(help.contains("HEADER LINE"));
-        assert!(help.contains("FOOTER LINE"));
-        assert!(help.contains("USAGE: demo <command> [options]"));
-        assert!(help.contains("-h, --help"));
-        assert!(help.contains("-V, --version"));
-    }
-
-    #[test]
-    fn test_help_hides_hidden_commands() {
-        let help = plain(&help_demo().help());
-        assert!(help.contains("build"));
-        assert!(help.contains("compile the project"));
-        // Hidden commands are always absent from help.
-        assert!(!help.contains("secret"));
-        assert!(!help.contains("do not show me"));
-    }
-
-    #[cfg(not(feature = "auth"))]
-    #[test]
-    fn test_help_shows_auth_command_without_auth_feature() {
-        // Without the `auth` feature, `requires_auth` is inert — the command is
-        // listed like any other.
-        let help = plain(&help_demo().help());
-        assert!(help.contains("publish"));
-    }
-
-    #[test]
-    fn test_help_shows_command_aliases() {
-        let help = plain(&help_demo().help());
-        assert!(help.contains("remove, rm, del"));
-    }
-
-    #[test]
-    fn test_help_omits_version_line_without_version() {
-        let mut app = App::new("demo");
-        app.register(Command::new("build"));
-        let help = plain(&app.help());
-        assert!(help.contains("-h, --help"));
-        assert!(!help.contains("--version"));
-    }
-
-    #[test]
-    fn test_help_flag_returns_help_signal() {
-        let app = help_demo();
-        // Top level.
-        let err = app.try_parse_from(["--help"]).unwrap_err();
-        assert!(matches!(err, ParseError::HelpRequested(ref text) if text.contains("USAGE")));
-        // Command level renders that command's help.
-        let err = app.try_parse_from(["build", "-h"]).unwrap_err();
-        assert!(matches!(err, ParseError::HelpRequested(ref text) if text.contains("demo build")));
-    }
-
-    #[test]
-    fn test_version_flag_returns_version_signal() {
-        let app = help_demo();
-        let err = app.try_parse_from(["--version"]).unwrap_err();
-        assert_eq!(err, ParseError::VersionRequested("1.0.0".into()));
-        let err = app.try_parse_from(["build", "-V"]).unwrap_err();
-        assert_eq!(err, ParseError::VersionRequested("1.0.0".into()));
-    }
-
-    #[test]
-    fn test_version_flag_is_unknown_without_version_set() {
-        let mut app = App::new("demo");
-        app.register(Command::new("build"));
-        let err = app.try_parse_from(["build", "--version"]).unwrap_err();
-        assert_eq!(
-            err,
-            ParseError::UnknownFlag {
-                flag: "--version".into()
-            }
-        );
-    }
-
-    #[test]
-    fn test_alias_dispatches_to_canonical_command() {
-        static HITS: AtomicUsize = AtomicUsize::new(0);
-        let mut app = App::new("demo");
-        app.register(Command::new("remove").aliases(["rm", "del"]).run(|_| {
-            let _ = HITS.fetch_add(1, Ordering::SeqCst);
-        }));
-
-        let matches = app.try_parse_from(["rm"]).unwrap();
-        // The alias resolves to the canonical name in the parsed result.
-        assert_eq!(matches.subcommand().map(|(name, _)| name), Some("remove"));
-        assert_eq!(HITS.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn test_user_defined_help_flag_overrides_builtin() {
-        let mut app = App::new("demo");
-        // A command that defines its own `--help` flag suppresses the built-in.
-        app.register(Command::new("run").arg(Arg::flag("help")));
-        let matches = app.try_parse_from(["run", "--help"]).unwrap();
-        assert!(matches.subcommand().unwrap().1.flag("help"));
-    }
-
-    // --- Auth seam (requires the `auth` feature) ---
-
-    #[cfg(feature = "auth")]
-    fn auth_app(ran: &'static AtomicUsize) -> App {
-        let mut app = App::new("demo");
-        app.register(Command::new("publish").requires_auth(true).run(move |_| {
-            let _ = ran.fetch_add(1, Ordering::SeqCst);
-        }));
-        app
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_auth_gated_command_blocked_without_hook() {
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        let app = auth_app(&RAN);
-        // No hook set → fail closed.
-        let err = app.try_parse_from(["publish"]).unwrap_err();
-        assert_eq!(
-            err,
-            ParseError::Unauthorized {
-                command: "publish".into()
-            }
-        );
-        assert_eq!(RAN.load(Ordering::SeqCst), 0);
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_auth_gated_command_refused_when_hook_denies() {
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        let app = auth_app(&RAN).auth(|_| false);
-        let err = app.try_parse_from(["publish"]).unwrap_err();
-        assert!(matches!(err, ParseError::Unauthorized { .. }));
-        assert_eq!(RAN.load(Ordering::SeqCst), 0);
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_auth_gated_command_runs_when_authorized() {
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        let app = auth_app(&RAN).auth(|_| true);
-        let _ = app.try_parse_from(["publish"]).unwrap();
-        assert_eq!(RAN.load(Ordering::SeqCst), 1);
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_auth_hook_receives_command_name() {
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        // Authorize everything except `publish`.
-        let app = auth_app(&RAN).auth(|req| req.command() != "publish");
-        let err = app.try_parse_from(["publish"]).unwrap_err();
-        assert!(matches!(err, ParseError::Unauthorized { .. }));
-        assert_eq!(RAN.load(Ordering::SeqCst), 0);
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_non_auth_command_ignores_hook() {
-        static RAN: AtomicUsize = AtomicUsize::new(0);
-        let mut app = App::new("demo").auth(|_| false);
-        app.register(Command::new("status").run(move |_| {
-            let _ = RAN.fetch_add(1, Ordering::SeqCst);
-        }));
-        // A command without `requires_auth` runs regardless of the (denying) hook.
-        let _ = app.try_parse_from(["status"]).unwrap();
-        assert_eq!(RAN.load(Ordering::SeqCst), 1);
-    }
-
-    #[cfg(feature = "auth")]
-    #[test]
-    fn test_help_lists_auth_command_only_when_authorized() {
-        let build = |authorize: bool| {
-            let mut app = App::new("demo").auth(move |_| authorize);
-            app.register(Command::new("publish").requires_auth(true).about("ship it"));
-            app.register(Command::new("build").about("compile"));
-            app
-        };
-        assert!(!build(false).help().contains("publish"));
-        assert!(build(true).help().contains("publish"));
-        // A non-gated command is listed either way.
-        assert!(build(false).help().contains("build"));
-    }
-}
-
-#[cfg(test)]
-mod proptests {
-    use proptest::prelude::*;
-
-    use super::*;
-    use crate::arg::Arg;
-
-    fn sample_app() -> App {
-        let mut app = App::new("demo").version("1.0.0");
-        app.register(
-            Command::new("build")
-                .aliases(["b"])
-                .arg(Arg::flag("release").short('r'))
-                .arg(Arg::count("verbose").short('v'))
-                .arg(Arg::option("jobs").short('j'))
-                .arg(Arg::option("define").short('D').multiple(true))
-                .arg(Arg::positional("targets").multiple(true))
-                .subcommand(Command::new("clean")),
-        );
-        app
-    }
-
-    proptest! {
-        /// No argument vector — however malformed — may panic the parser.
-        #[test]
-        fn test_try_parse_never_panics(tokens in proptest::collection::vec(".*", 0..8)) {
-            let app = sample_app();
-            let _ = app.try_parse_from(tokens);
-        }
-    }
-}
+mod tests;

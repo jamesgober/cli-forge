@@ -10,8 +10,9 @@
 //! ```
 
 use cli_forge::{App, Arg, Command, out, style};
+use std::process::ExitCode;
 
-fn main() {
+fn main() -> ExitCode {
     let mut app = App::new("demo")
         .version(env!("CARGO_PKG_VERSION"))
         .help_header("demo — a cli-forge example")
@@ -70,5 +71,5 @@ fn main() {
 
     // Parses the process arguments, runs the selected command's handler, and on
     // malformed input prints a structured error and exits with status 2.
-    let _matches = app.parse();
+    app.run()
 }

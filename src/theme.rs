@@ -574,8 +574,11 @@ fn active() -> &'static std::sync::RwLock<Theme> {
 }
 
 /// Print `value` through the process theme at `level`, to that level's stream.
+///
+/// Also the route the command layer takes to report a failure, so a program's
+/// errors look like the rest of its output rather than like a different tool.
 #[cfg(feature = "std")]
-fn emit<T: Display>(level: Level, value: T) {
+pub(crate) fn emit<T: Display>(level: Level, value: T) {
     // The theme is read under a lock, so the line is built here and written
     // afterwards: no I/O happens while the lock is held.
     let (line, stream) = match active().read() {

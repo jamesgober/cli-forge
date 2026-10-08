@@ -7,8 +7,9 @@
 //! ```
 
 use cli_forge::{App, Arg, Command, out};
+use std::process::ExitCode;
 
-fn main() {
+fn main() -> ExitCode {
     let mut app = App::new("cc").version(env!("CARGO_PKG_VERSION"));
 
     app.register(
@@ -53,5 +54,5 @@ fn main() {
             }),
     );
 
-    let _ = app.parse();
+    app.run()
 }

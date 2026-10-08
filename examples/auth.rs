@@ -18,8 +18,9 @@
 //! ```
 
 use cli_forge::{App, Command, out};
+use std::process::ExitCode;
 
-fn main() {
+fn main() -> ExitCode {
     // The consumer decides what "authorized" means; cli-forge only asks. Keep the
     // hook pure — it is also consulted while rendering help.
     let logged_in = std::env::var_os("DEMO_LOGGED_IN").is_some();
@@ -43,5 +44,5 @@ fn main() {
 
     // `publish` runs only when the hook authorizes it; otherwise `parse` prints
     // "error: not authorized to run: publish" and exits 2.
-    let _ = app.parse();
+    app.run()
 }

@@ -224,9 +224,9 @@ pub use crate::auth::AuthRequest;
 #[cfg(feature = "std")]
 pub use crate::command::Command;
 #[cfg(feature = "std")]
-pub use crate::error::ParseError;
+pub use crate::error::{CommandError, ErrorKind, Outcome, ParseError};
 #[cfg(feature = "std")]
-pub use crate::matches::Matches;
+pub use crate::matches::{Matches, ValueSource};
 #[cfg(feature = "std")]
 pub use crate::output::{err, out, write_to};
 #[cfg(feature = "std")]
