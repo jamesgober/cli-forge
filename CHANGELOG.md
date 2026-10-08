@@ -21,6 +21,217 @@
 
 ---
 
+## [2.0.0] - 2026-10-08
+
+The output layer becomes **themed and reusable**, the command layer gains the
+argument model a real CLI needs, and the styling core becomes a seam sibling
+crates can build on. Four confirmed 1.x defects are fixed, each of which made a
+legitimate command line unparseable.
+
+This is a breaking release. `docs/API.md` froze the 1.x surface "until 2.0";
+this is that. See [Migrating from 1.x](#migrating-from-1x) below — most programs
+need a handful of renames.
+
+### Added
+
+**Themed responses.** The headline: a `Theme` maps each of the eight `Level`s a
+CLI speaks in (`Success`, `Error`, `Warning`, `Info`, `Hint`, `Note`, `Debug`,
+`Trace`) onto a style, a glyph, and a stream. The free functions `ok`, `fail`,
+`warn`, `info`, `hint`, `note`, `debug`, and `trace` print through it, so no
+call site names a colour and the whole program restyles in one place.
+
+- `Theme::new`, `Theme::plain`, `Theme::set`, `Theme::set_style`,
+  `Theme::set_stream`, `Theme::set_glyphs`, `Theme::install`, `Theme::current`,
+  `Theme::render`, `Theme::render_at`.
+- `Glyphs::{Auto, Unicode, Ascii, None}`. Under `Auto`, `✓` becomes `+` where
+  the destination cannot render it; every ASCII stand-in is one column wide, so
+  a column of status lines stays aligned either way.
+- Diagnostics go to standard error and data to standard output by default, so a
+  program's output stays pipeable without the program arranging it.
+
+**Styles carry their decoration.** A `Style` is now a reusable value describing a
+whole appearance, not just colours — which is what removes the hand-built
+markers 1.x left to each call site.
+
+- `Style::new` (text-less, for reuse) and `Style::paint` / `Style::paint_at`,
+  which apply one style to any number of values with no allocation.
+- `Style::prefix`, `Style::suffix`, `Style::pad_to`, `Style::align`,
+  `Style::link` (OSC 8 hyperlinks), `Style::merge`, `Style::is_plain`.
+- `Painted<T>`, the printable result of `paint`.
+- Padding is measured in **display columns**, so a column stays straight whether
+  the content is ASCII, accented, CJK, or already styled.
+
+**The full colour model.** `Color` is now public and complete.
+
+- All sixteen terminal colours including the bright half (`bright_red`, …), the
+  256-colour palette (`Style::ansi`, `Color::Ansi`), and exact 24-bit values.
+- Backgrounds throughout: `on_red`, `on_hex`, `on_rgb`, `on_ansi`, `Style::bg`.
+- Eight attributes: `bold`, `dim`, `italic`, `underline`, `blink`, `reverse`,
+  `hidden`, `strike`.
+- `Color::parse` accepts names (case- and separator-insensitive, so `BrightRed`,
+  `bright_red`, and `bright red` all work), `#rrggbb`, the `#rgb` shorthand,
+  `r,g,b`, and a bare palette index. `Color::to_rgb`, `Color::from_hex`.
+- Exact colours degrade through the palette (now including the greyscale ramp)
+  to the nearest of the sixteen, using weighted-luminance distance rather than
+  plain Euclidean — which stopped mid greens resolving to black.
+
+**A `text` module: the measurement seam.** Everything that lines things up needs
+one correct answer to "how many columns is this?", and a table or progress crate
+cannot get it from `str::len`.
+
+- `text::width`, `text::strip`, `text::pad`, `text::truncate`, `text::wrap`,
+  `text::sanitize`, `text::Align`.
+- `text::sanitize` neutralises terminal escape injection from untrusted input —
+  a filename, a commit message, a server response — which 1.x wrote verbatim.
+
+**Terminal control.**
+
+- `ColorChoice::{Auto, Always, Never}` with `terminal::set_color_choice`, which
+  is what a `--color` flag drives; `terminal::set_level` / `clear_level` for a
+  destination whose capability is known from outside.
+- `Stream::{Stdout, Stderr}`, detected **independently**.
+- `terminal::size`, `terminal::width_or`, `terminal::supports_unicode`.
+- `ColorLevel` is public and ordered by capability.
+
+**The argument model.**
+
+- `App::arg` / `App::args` for app-level arguments, and `Arg::global` to make one
+  usable on either side of the command name, recorded once and visible at every
+  level.
+- `Arg::value_name`, `Arg::env`, `Arg::possible_values`, `Arg::validate`,
+  `Arg::conflicts_with`, `Arg::requires`, `Arg::required_unless`, `Arg::hide`.
+- `Matches::get::<T>`, `try_get::<T>`, `get_all::<T>`, `present`, `source`,
+  `subcommand_name`, `command_path`, `leaf`.
+- `ValueSource::{CommandLine, Environment, Default}`, so a program can tell "the
+  user chose this" from "nobody said".
+
+**Errors that answer "what now?"** A `ParseError` carries the subject, what
+would have been valid, the nearest spelling to what was typed, and the usage
+line of the command being invoked.
+
+- `ErrorKind` (fifteen variants), `ParseError::{kind, subject, detail,
+  suggestion, usage, text, is_request, exit_code, stream, report,
+  styled_report}`.
+- Did-you-mean suggestions for commands, subcommands, flags, and the members of
+  a `possible_values` set.
+
+**Dispatch and exit codes.**
+
+- `App::run` returns an `ExitCode` for `fn main() -> ExitCode`; `App::try_run_from`
+  and `App::dispatch` for tests and for programs that dispatch themselves.
+- Handlers may return any printable `Result`, so `?` works inside a command.
+  `Command::run_status` carries an exact exit status.
+- `CommandError`, `Outcome`.
+- Help and version exit `0`; a bad command line exits `2`; a failed command
+  exits `1` or its own status.
+
+**Help.**
+
+- `App::about`, `App::long_about`, `App::command`, `App::help_command`,
+  `App::theme`, `App::color`, `App::command_help`.
+- `Command::long_about`, `before_help`, `after_help`, `usage`, `display_order`,
+  `subcommand_required`, `args`.
+- An automatic `help [command]` subcommand; a bare invocation shows the page
+  rather than exiting silently; descriptions wrap to the terminal width; an
+  argument's default, environment variable, and allowed values are stated.
+
+**Introspection, for the sibling crates.** `App::{name, version_text, commands,
+global_arguments}`, `Command::{name, alias_names, about_text, arguments,
+subcommands, is_hidden, is_auth_gated}`, and `Arg::{name, short_form, long_form,
+help_text, default_value, env_var, allowed_values, is_required, is_multiple,
+is_hidden, is_global, expects_value, is_positional}`. A completions or
+manual-page generator can now read the live command tree instead of being handed
+a second description of the same CLI.
+
+**Markup.** `<d>` dim, `<i>` italic, `<s>` strike, `<r>` reverse, `<bg=…>`
+backgrounds, `<link=…>` hyperlinks, and `<<` for a literal `<`. `markup_at` for
+an explicit depth.
+
+### Changed
+
+- **`--no-default-features` is now a real `no_std` build** of the styling core
+  (colour, style, text, markup, themes) on `alloc` alone, rather than an empty
+  crate whose own test suite would not compile.
+- New default features `unicode` and `termsize`, for correct display widths and
+  terminal-aware wrapping. Both can be turned off; the fallbacks are documented.
+- `ParseError` is a struct with an `ErrorKind` rather than an enum with payloads,
+  and is boxed internally so `Result<Matches, ParseError>` stays small.
+- `panic = "abort"` removed from the release profile: in a library's own profile
+  it only affected this crate as a root, while breaking `cargo bench` and any
+  consumer's use of `catch_unwind`.
+
+### Fixed
+
+- **Negative numbers were unparseable.** `calc add -5 3` reported
+  `UnknownFlag { flag: "-5" }`. A leading `-` is now only treated as a flag when
+  it could be one, so negative numbers — and `-`, the read-standard-input
+  convention — are values. A command that really declares `-5` still gets it.
+- **There were no app-level arguments at all.** `demo --verbose build` reported
+  `UnknownFlag`.
+- **A parent's required positionals were demanded even when a subcommand took
+  over.** `remote list` reported `MissingRequired { arg: "name" }`, which made
+  every grouping command with its own positionals unusable.
+- **`App::parse()` panicked on an argument that was not valid UTF-8**, because
+  `std::env::args` does. Process arguments are now read as `OsString` and
+  reported, never panicked on.
+- **Help columns were aligned by byte length**, so a command named `ünïcödé` or
+  `日本語` skewed every row. Alignment is now measured in display columns.
+- **Standard error's styling was decided by standard output's capability**, so a
+  program with one stream redirected got one of the two wrong.
+- The colour level was cached in a `OnceLock`, making the first observation
+  permanent — which is also what made styled output untestable.
+- Markup nesting was unbounded on hostile input; it is now capped, with tags past
+  the cap kept as the literal text they look like rather than dropped.
+- A stray escape byte corrupted the sequence after it during measurement and
+  truncation.
+
+### Security
+
+- `text::sanitize` neutralises the control characters that let untrusted text
+  take over a terminal: clearing the screen, repositioning the cursor to
+  overwrite earlier output, relabelling the window, or changing colours
+  permanently. 1.x wrote such text verbatim.
+- Markup nesting is capped at 64 frames, so markup from an untrusted source
+  cannot grow the parser's state without bound.
+- `Arg::env` lets a secret stay out of the process list, where `--token` is
+  visible to every user on the machine.
+- The `auth` seam still fails closed: an auth-gated command with no hook is never
+  authorized, and never appears in help.
+
+### Performance
+
+Measured with `criterion`; the styling optimisation replaced `core::fmt`'s
+integer formatter with tables for the fixed set of SGR codes.
+
+| Benchmark | 1.x | 2.0 | |
+|---|---|---|---|
+| `paint_named_colour` | 160 ns | 103 ns | −36% |
+| `paint_exact_colour` | 316 ns | 184 ns | −40% |
+| `paint_downgraded_to_16` | 201 ns | 138 ns | −31% |
+| `markup_rich` | 409 ns | 234 ns | −42% |
+| `theme_render` | 246 ns | 167 ns | −30% |
+
+The plain path (`out` / `err`) is byte-for-byte unchanged at ~9.5 ns and remains
+allocation-free, which `tests/allocation.rs` asserts by measurement.
+
+### Migrating from 1.x
+
+| 1.x | 2.0 | Why |
+|---|---|---|
+| `parse("<c=red>x</c>")` | `out(markup("<c=red>x</c>"))` | `markup` returns a `String`, so it composes — into a file, a table cell, or `text::width`. The old name also collided with argument parsing. |
+| `define_tag("e", style("").red())` | `define("e", Style::new().red())` | "tag" meant both a markup tag and a named style. |
+| `tag("e").render_with("msg")` | `named("e").paint("msg")` | Returns a `Style`, so decoration travels with the name and reuse costs no allocation. |
+| `ParseError::UnknownFlag { flag }` | `err.kind() == ErrorKind::UnknownFlag`, `err.subject()` | The error now also carries a suggestion and a usage line. |
+| `app.try_parse_from(..)` ran handlers | `app.try_run_from(..)` | `try_parse_from` now only parses. **This is the one silent behaviour change**: a program relying on parsing to dispatch will stop running handlers. `App::parse` and `App::run` still dispatch. |
+| `Command::run(\|m\| { .. })` | unchanged | Handlers may now also return a `Result`. |
+| `App::parse() -> Matches` | `App::run() -> ExitCode` | `parse` still works; `run` hands the exit decision to `main`. |
+
+Two behaviours changed without a rename, both deliberate: a bare invocation now
+shows the help instead of doing nothing (`App::help_command(false)` restores the
+old behaviour), and `prog help [command]` is accepted.
+
+---
+
 ## [1.0.0] - 2026-07-01
 
 The stable API freeze. No new public API — the surface built across the 0.x series

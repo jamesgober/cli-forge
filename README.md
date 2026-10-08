@@ -18,7 +18,7 @@
 
 <div align="left">
     <p>
-        cli-forge is a unified command-line framework where argument parsing and styled output speak one API. Commands register at runtime - from anywhere, not just main - and can be hidden or auth-gated; output flows through a single layer (plain, tag-parsed, or builder-styled) that extensions like tables, progress, and gradients reuse seamlessly. It targets the lightness of argh with the reach of clap, without the split between parsing in one crate and styling in five.
+        cli-forge is a unified command-line framework where argument parsing and styled output speak one API. Output is <em>themed</em> rather than restyled at every call site: a theme states what success, failure, and warning look like once, and nothing after that names a colour. Commands register at runtime - from anywhere, not just main - and can be hidden or auth-gated. The styling and measurement layers are seams that sibling crates (tables, progress, gradients) build on, so everything a program prints speaks one system. It targets the lightness of argh with the reach of clap, without the split between parsing in one crate and styling in five.
     </p>
     <br>
     <hr>
@@ -26,7 +26,7 @@
         <strong>MSRV is 1.85+</strong> (Rust 2024 edition).
     </p>
     <blockquote>
-        <strong>Status: 1.0 &mdash; stable.</strong> The public API is frozen under <a href="https://semver.org/">Semantic Versioning</a>: no breaking changes before <code>2.0</code>. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
+        <strong>Status: 2.0 &mdash; stable.</strong> The public API is frozen under <a href="https://semver.org/">Semantic Versioning</a>: no breaking changes before <code>3.0</code>. Migrating from <code>1.x</code> is a handful of renames &mdash; see the <a href="./CHANGELOG.md#migrating-from-1x">migration table</a>.
     </blockquote>
 </div>
 
@@ -35,33 +35,58 @@
 
 ## What's here
 
-`v1.0.0` is the **stable API freeze**. The framework is feature-complete — the
-output layer, command layer, help engine, and auth seam are all in place, and the
-public surface is guaranteed under SemVer:
+`v2.0.0`. Two things set cli-forge apart from the alternatives: **output is
+themed and reusable** rather than restyled at every call site, and the **styling
+layer is a seam** sibling crates build on, so everything a program prints speaks
+one system.
 
+- **Themed responses** — `ok`, `fail`, `warn`, `info`, `hint`, `note`, `debug`,
+  `trace`. A `Theme` maps each level onto a style, a glyph, and a stream, once.
+  No call site names a colour; replace the theme and the whole program changes
+  together. Glyphs fall back to ASCII where the destination cannot render them,
+  and diagnostics go to standard error so piped output stays clean.
+- **Reusable styles** — a `Style` carries its whole appearance: colours,
+  attributes, a prefix glyph, a suffix, a display-column width, an alignment, a
+  hyperlink. Describe a marker once, apply it to anything with `paint`.
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
-  string literal. The hot path stays cheap.
-- **Three styling paths** — a chainable `style` builder, inline `parse` tags, and
-  a named `define_tag` / `tag` registry. All three render to **identical bytes**
-  for the same intent.
-- **Full color** — the eight standard names plus any 24-bit color via hex or RGB,
-  with graceful downgrade to 256- or 16-color terminals and clean fall-back to
-  plain text on pipes, `NO_COLOR`, or the Windows console without ANSI.
-- **Command tree** — a recursive `Command` tree with a full argument model
-  (flags, **counting** flags `-vvv`, options, **repeatable** options, positionals,
-  **variadic** positionals) and **aliases**, registered into an `App` **from
-  anywhere** (not just `main`), with `.hidden()` / `.requires_auth()` flags and
-  structured, non-panicking errors.
-- **Help & version** — auto-generated `--help` / `-h` (top-level and per-command)
-  and `--version` / `-V`, rendered through the output layer with injectable
-  header/footer.
+  string literal, ~9.5 ns. The hot path stays cheap.
+- **Four styling paths** — the `style` builder, inline `markup`, a named
+  `define` / `named` registry, and theme levels. All render to **identical
+  bytes** for the same intent, which is what makes mixing them safe.
+- **Full colour** — all sixteen terminal colours including the bright half, the
+  256-colour palette, any 24-bit value, backgrounds throughout, and eight
+  attributes. Exact colours degrade to the nearest the terminal can render
+  rather than being dropped. Capability is detected **per stream**, and
+  `ColorChoice` is what a `--color` flag drives.
+- **Text measurement** — `text::width`, `strip`, `pad`, `truncate`, `wrap`,
+  `sanitize`, all in display columns rather than bytes. This is the seam a table
+  or progress crate needs; `sanitize` neutralises terminal escape injection from
+  untrusted input.
+- **Command tree** — a recursive `Command` tree registered into an `App` **from
+  anywhere** (not just `main`), with aliases, `hidden`, `requires_auth`,
+  `subcommand_required`, and `display_order`.
+- **A real argument model** — flags, counting flags (`-vvv`), options,
+  repeatable options, positionals, variadic positionals, app-level and
+  **global** arguments, environment fallbacks, defaults, `possible_values`,
+  arbitrary validators, conflicts, dependencies, and `required_unless`. Values
+  are checked at the edge, so reading them back cannot fail.
+- **Errors that answer "what now?"** — a `ParseError` carries the subject, what
+  would have been valid, the nearest spelling to what was typed, and the usage
+  line. Help and version exit `0`; a bad command line exits `2`.
+- **Help** — auto-generated, wrapped to the terminal, aligned in display
+  columns, with `long_about`, `before_help`, `after_help`, a usage override, an
+  automatic `help [command]` subcommand, and each argument's fallbacks stated.
+- **Introspection** — `App`, `Command`, and `Arg` expose read-only accessors, so
+  a completions or manual-page crate reads the live command tree instead of a
+  second hand-maintained description of it.
 - **Auth seam** *(feature `auth`)* — gate a command behind a consumer-supplied
-  authorization hook. cli-forge holds the seam; the login state lives in your code.
-  Fails closed, and hides unauthorized commands from help.
+  hook. cli-forge holds the seam; the login state lives in your code. Fails
+  closed, and hides unauthorized commands from help.
+- **`no_std`** — `--no-default-features` is a real build of the styling core on
+  `alloc` alone.
 
-Everything above is stable. Future `1.x` releases add only strictly-additive API,
-bug fixes, and internal optimization; nothing existing changes before `2.0`. See
-the [`ROADMAP`](./dev/ROADMAP.md).
+Migrating from `1.x` is a handful of renames; see the
+[migration table](./CHANGELOG.md#migrating-from-1x).
 
 <hr>
 <br>
@@ -70,15 +95,16 @@ the [`ROADMAP`](./dev/ROADMAP.md).
 
 ```toml
 [dependencies]
-cli-forge = "1.0"
+cli-forge = "2.0"
 ```
 
-Color is on by default. For a build that never emits escape sequences (the API
-stays complete; every styled value renders as its plain text):
+The defaults are `std`, `color`, `unicode`, and `termsize`. For a build with no
+dependencies at all (correct for Latin text; CJK and emoji widths become
+approximate, and help wraps to `COLUMNS` or 80):
 
 ```toml
 [dependencies]
-cli-forge = { version = "1.0", default-features = false, features = ["std"] }
+cli-forge = { version = "2.0", default-features = false, features = ["std", "color"] }
 ```
 
 <br>
@@ -86,120 +112,272 @@ cli-forge = { version = "1.0", default-features = false, features = ["std"] }
 ## Quick Start
 
 ```rust
-use cli_forge::{define_tag, err, out, parse, style, tag};
+use std::process::ExitCode;
 
-// Plain output — the common case.
-out("building...");
-err("something went wrong");
+use cli_forge::{ok, out, warn, App, Arg, Command};
 
-// Styling, three ways, all rendering to the same bytes for the same intent:
-out(style("done").green().bold());                          // builder
-parse("<c=red><b>ERROR:</b></c> <c=#ff8800>low disk</c>");  // inline tags
-define_tag("error", style("").red().bold());                // named registry
-out(tag("error").render_with("build failed"));
+fn main() -> ExitCode {
+    let mut app = App::new("forge")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about("a project constructor")
+        .arg(Arg::count("verbose").short('v').global(true));
+
+    app.register(
+        Command::new("build")
+            .about("compile the project")
+            .arg(Arg::flag("release").short('r'))
+            .arg(Arg::option("jobs").short('j').default("1"))
+            .run(|m| {
+                let jobs: u16 = m.get("jobs").unwrap_or(1);
+                out(format!("building with {jobs} job(s)"));
+                if !m.flag("release") {
+                    warn("this build is not optimised");
+                }
+                ok("compiled 3 targets");
+            }),
+    );
+
+    app.run()
+}
 ```
 
 <br>
 
-## The three styling paths
+## Themed output
 
-The same styled line, produced three ways. The choice is ergonomic, not visual —
-the bytes are identical.
+The problem this solves: in most codebases every status line restyles itself by
+hand, so changing how a program looks means touching every call site. A theme
+states the vocabulary once.
 
 ```rust
-use cli_forge::{define_tag, out, parse, style, tag};
+use cli_forge::{fail, hint, ok, warn, Glyphs, Level, Style, Theme};
 
-// 1. Builder — chain methods; the result is `Display`. Best for computed/one-off.
+Theme::new()
+    .set(Level::Success, Style::new().bright_green().bold(), "✓")
+    .set(Level::Error, Style::new().bright_red().bold(), "✗")
+    .set_glyphs(Glyphs::Auto)   // Unicode where it renders, ASCII where it does not
+    .install();
+
+ok("deployed to staging");
+warn("2 tests skipped");
+fail("smoke test failed");
+hint("try `--release` for an optimised build");
+```
+
+Nothing after `install` names a colour. `Theme::plain()` is what a `--plain`
+flag should install; `Theme::current()` hands back a copy; a theme is a plain
+value, so a library can render through its own without disturbing the host
+program's.
+
+<br>
+
+## Reusable styles
+
+A `Style` carries its decoration, which is what removes hand-built markers:
+
+```rust
+use cli_forge::{define, named, out, Style};
+
+// Described once — the glyph, the colour, and the column width travel together.
+define("step", Style::new().bright_black().prefix("  → ").pad_to(24));
+
+let step = named("step");           // one lookup
+for label in ["resolve dependencies", "compile", "link"] {
+    out(step.paint(label));         // many uses, no allocation beyond the line
+}
+```
+
+`pad_to` measures **display columns**, so the column stays straight whether the
+content is ASCII, accented, CJK, or already styled — which `format!("{:<24}")`
+cannot do.
+
+<br>
+
+## The four styling paths
+
+The same styled line, four ways. The choice is ergonomic, not visual: the bytes
+are identical, and the cross-path tests assert that at every colour depth.
+
+```rust
+use cli_forge::{define, markup, named, out, style, Level, Style, Theme};
+
+// 1. Builder — chain methods; the result is `Display`. Best for one-offs.
 out(style("ERROR: build failed").red().bold());
 
-// 2. Tags — one string with inline markup. Best when text and style live together.
-parse("<c=red><b>ERROR: build failed</b></c>");
+// 2. Markup — one string with inline tags. Best when the styling varies run by
+//    run inside a sentence.
+out(markup("<c=red><b>ERROR: build failed</b></c>"));
 
-// 3. Named registry — define the look once, reuse by name across the program.
-define_tag("error", style("").red().bold());
-out(tag("error").render_with("ERROR: build failed"));
+// 3. Named registry — describe the look once, recall it anywhere by name.
+define("error", Style::new().red().bold());
+out(named("error").paint("ERROR: build failed"));
+
+// 4. Theme level — best for the handful of things every program says.
+cli_forge::fail("build failed");
 ```
 
-**Tag grammar:** `<b>…</b>` (bold), `<u>…</u>` (underline),
-`<c=VALUE>…</c>` (color, where `VALUE` is a named color, `#rrggbb`, or `r,g,b`),
-and `</>` to close the innermost tag. Tags nest; unrecognized tags print
-literally, so `parse` never rejects input.
+**Markup grammar:** `<b>` bold, `<d>` dim, `<i>` italic, `<u>` underline,
+`<s>` strike, `<r>` reverse, `<c=VALUE>` foreground, `<bg=VALUE>` background,
+`<link=URL>` hyperlink, `</x>` to close that tag, `</>` to close the innermost,
+and `<<` for a literal `<`. `VALUE` is a colour name, `#rrggbb`, `#rgb`,
+`r,g,b`, or a palette index. Tags nest; anything unrecognised prints literally,
+so markup never rejects input or swallows a message.
 
 <br>
 
-## Colors and terminals
-
-Colors are the eight standard names, plus any 24-bit value:
+## Colours and terminals
 
 ```rust
-use cli_forge::{out, style};
+use cli_forge::{out, style, Color};
 
 out(style("amber").hex("#ff8800"));
 out(style("teal").rgb(0, 200, 120));
-out(style("link").hex("#3b82f6").underline());
+out(style("indexed").ansi(208));
+out(style(" PASS ").black().on_green().bold());
+out(style("the docs").cyan().underline().link("https://docs.rs/cli-forge"));
 ```
 
-The terminal's capability is detected once. A 24-bit color renders exactly on a
-true-color terminal, downgrades to the nearest 256- or 16-color value where that
-is all the terminal supports, and falls away to plain text when output is a pipe,
-`NO_COLOR` is set, or the crate is built without `color`. `CLICOLOR_FORCE`
-overrides detection and forces color on. The Windows console is handled behind the
-same API — virtual-terminal mode is enabled automatically, with a plain-text
-fall-back if it cannot be.
+Capability is detected **once per stream** and cached, so a program whose data is
+piped while its diagnostics stay on the terminal gets clean bytes in the pipe and
+colour on screen. An exact colour renders precisely on a true-colour terminal,
+degrades to the nearest palette or standard colour where that is all the terminal
+supports, and falls away to plain text on a pipe, under `NO_COLOR`, or without the
+`color` feature. `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, and `FORCE_COLOR` are
+all honoured, and Windows Terminal and ConEmu are recognised as true colour. The
+Windows console is handled behind the same API, with virtual-terminal mode
+enabled automatically and a plain-text fall-back if it cannot be.
+
+Detection can always be overridden — which is what a `--color` flag needs, and
+what makes styled output testable:
+
+```rust
+use cli_forge::{terminal, ColorChoice};
+
+terminal::set_color_choice(ColorChoice::Never);
+```
 
 <br>
 
-## Commands
-
-Build a recursive command tree, register commands into an `App` from anywhere, and
-let `parse` resolve the invocation, parse arguments, and run the selected
-command's handler:
+## Commands and arguments
 
 ```rust
-use cli_forge::{App, Arg, Command, out};
+use std::process::ExitCode;
 
-let mut app = App::new("forge");
+use cli_forge::{out, App, Arg, Command};
 
-app.register(
-    Command::new("build")
-        .about("compile the project")
-        .arg(Arg::flag("release").short('r'))
-        .arg(Arg::option("jobs").short('j').default("1"))
-        .run(|m| out(format!(
-            "release={} jobs={}",
-            m.flag("release"),
-            m.value("jobs").unwrap_or("?"),
-        ))),
-);
+fn main() -> ExitCode {
+    let mut app = App::new("forge")
+        .version(env!("CARGO_PKG_VERSION"))
+        // An app-level argument, usable on either side of the command name.
+        .arg(Arg::count("verbose").short('v').global(true));
 
-app.register(
-    Command::new("remote").subcommand(
-        Command::new("add")
-            .arg(Arg::positional("url").required(true))
-            .run(|m| out(format!("added {}", m.value("url").unwrap_or("?")))),
-    ),
-);
+    app.register(
+        Command::new("build")
+            .about("compile the project")
+            .arg(Arg::positional("targets").multiple(true))
+            .arg(Arg::flag("release").short('r'))
+            .arg(Arg::option("jobs").short('j').default("1").value_name("N")
+                .validate(|v| v.parse::<u16>().map(|_| ())
+                    .map_err(|_| "expected a count".to_string())))
+            .arg(Arg::option("level").possible_values(["warn", "info", "debug"]))
+            .arg(Arg::option("token").env("FORGE_TOKEN"))
+            // `?` works inside a handler against any error type.
+            .run(|m| -> std::io::Result<()> {
+                out(std::fs::read_to_string("forge.toml")?);
+                Ok(())
+            }),
+    );
 
-let _ = app.parse();
+    app.register(
+        Command::new("remote")
+            .subcommand_required(true)
+            .subcommand(Command::new("add").arg(Arg::positional("url").required(true))),
+    );
+
+    app.run()
+}
 ```
 
 Commands register **from anywhere** — a command built in a non-`main` module is
-reachable and behaves identically, the limitation that made the predecessor
-unusable. Give a command extra names with `.alias("rm")` / `.aliases(["rm", "del"])`;
-aliases resolve to the canonical command. Arguments cover flags, counting flags
-(`Arg::count`, read with `count()`), options, repeatable options and variadic
-positionals (`.multiple(true)`, read with `values()`), and positionals — parsed
-from all the standard forms (`--long`, `--long=value`, `-s`, `-svalue`, bundled
-`-abc`, `-vvv`, `--`). Malformed input becomes a structured `ParseError`: `parse`
-prints it and exits `2`, never panicking; `try_parse_from` returns it instead.
-`.hidden()` keeps a command invokable but out of help; `.requires_auth()` gates it
-behind the auth hook (feature `auth`).
+reachable and behaves identically, which is what lets each command live beside
+the code it drives. All the standard argument forms parse (`--long`,
+`--long=value`, `-s`, `-svalue`, `-s=value`, bundled `-abc`, `-vvv`, `--`), and
+so do the two cases most parsers get wrong: a negative number (`-5`) and a lone
+`-`.
 
-**Help and version come for free.** `-h` / `--help` renders styled help for the
-app or any command (with your `help_header` / `help_footer`); `-V` / `--version`
-prints `App::version(...)`. `App::help()` renders the top-level help as a string
-whenever you want it. Both exit `0` under `parse`; `try_parse_from` returns them
-as `ParseError::HelpRequested` / `VersionRequested` control signals.
+Values are validated **at the edge**, so a bad one is refused with a proper
+command-line error naming the flag, the value, and what would have been accepted
+— before any of your code runs. Reading them back then cannot fail:
+
+```rust
+let jobs: u16 = m.get("jobs").unwrap_or(1);
+```
+
+`Matches::source` says whether a value came from the command line, the
+environment, or a default — the distinction a sentinel default cannot express.
+
+**Entry points.** Four, because programs want different things:
+
+| Method | Parses | Runs handlers | Prints | Exits |
+|---|---|---|---|---|
+| `run` | process args | yes | yes | returns a code |
+| `parse` | process args | yes | yes | yes |
+| `try_run_from` | given args | yes | no | no |
+| `try_parse_from` | given args | no | no | no |
+
+`try_parse_from` parses and nothing else, which is what makes it the one to test
+with.
+
+<br>
+
+## Errors
+
+```text
+error: unknown flag '--releaze'
+
+  did you mean '--release'?
+
+USAGE: forge build [options] [targets]...
+```
+
+A `ParseError` is a value: `kind()`, `subject()`, `detail()`, `suggestion()`,
+`usage()`, `exit_code()`, `stream()`, and `report()` for the whole thing. Nothing
+panics, and nothing prints until you ask. Help and version come back through the
+same channel as `ErrorKind::HelpRequested` / `VersionRequested`, and are
+successes — `exit_code()` is `0` and `stream()` is standard output, so `--help`
+can be piped.
+
+<br>
+
+## Untrusted text
+
+A string from outside the program — a filename, a commit message, a server
+response — can contain escape sequences, and printing it verbatim hands the
+terminal to whoever wrote it:
+
+```rust
+use cli_forge::{out, text};
+
+out(text::sanitize(&untrusted_filename));
+```
+
+<br>
+
+## For sibling crates
+
+cli-forge owns parsing, output, command registration, and help. It deliberately
+does not own tables, progress bars, gradients, layouts, or shells — those are
+sibling crates that build on these seams:
+
+- `text::width` / `strip` / `pad` / `truncate` / `wrap` — the one correct answer
+  to "how many columns is this?", which nothing that draws a box can do without.
+- `Style` / `Color` / `Theme` — so a table's borders and a progress bar's fill
+  honour the host program's theme rather than inventing their own.
+- `terminal::level` / `size` / `supports_unicode` — one capability decision for
+  the whole program.
+- `App::commands` / `Command::arguments` / `Arg::allowed_values` and the rest of
+  the read-only accessors — so a completions or manual-page generator reads the
+  live tree.
 
 <br>
 
@@ -207,30 +385,32 @@ as `ParseError::HelpRequested` / `VersionRequested` control signals.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `std` | yes | Standard library: terminal detection, the stdout/stderr writers, and the command layer. |
-| `color` | yes | ANSI / styled output. Implies `std`. Disable for plain output (still complete). |
-| `auth` | no | The auth seam: `App::auth`, `AuthRequest`, and enforcement of `requires_auth`. Implies `std`; adds no dependencies. |
+| `std` | yes | Terminal detection, the stdout/stderr writers, and the command layer. Without it, the styling core still works on `alloc`. |
+| `color` | yes | ANSI / styled output. Disable for plain output; the API stays complete and every styled value renders as its plain text. |
+| `unicode` | yes | Correct display widths for CJK, emoji, and combining marks, from the Unicode East Asian Width tables. Without it widths are counted in characters — exact for Latin, Greek, and Cyrillic, wrong for the rest. |
+| `termsize` | yes | Query the real terminal for its size, so help wraps to the window. Without it only `COLUMNS`/`LINES` are consulted. |
+| `auth` | no | The auth seam: `App::auth`, `AuthRequest`, and enforcement of `requires_auth`. Adds no dependencies. |
 
 <br>
 
 ## Examples
 
-Runnable examples live in [`examples/`](./examples):
-
 ```bash
-cargo run --example quick_start     # plain output and one styled line
-cargo run --example three_paths     # the same line, three ways
-cargo run --example colors          # named, hex, and rgb color
+cargo run --example quick_start     # a real command line, themed output
+cargo run --example theme           # the eight levels, and restyling them
+cargo run --example four_paths      # the same line, four ways
+cargo run --example colors          # named, bright, indexed, hex, and rgb
 cargo run --example status_report   # a realistic deploy-style status report
-cargo run --example commands -- build --release -j 8   # the command tree
-cargo run --example arguments -- build -vv -D A -D B a.rs b.rs   # every arg kind
+cargo run --example commands -- build --release -j 8
+cargo run --example arguments -- build -vv -D A -D B a.rs b.rs
 ```
 
-Force color when output is captured, or disable it, to see both paths:
+See the theme and its fall-backs under different terminals:
 
 ```bash
-CLICOLOR_FORCE=1 cargo run --example status_report
-NO_COLOR=1       cargo run --example status_report
+NO_COLOR=1       cargo run --example status_report   # no styling
+NO_UNICODE=1     cargo run --example status_report   # ASCII markers
+CLICOLOR_FORCE=1 cargo run --example status_report   # colour into a pipe
 ```
 
 <br>
@@ -238,18 +418,22 @@ NO_COLOR=1       cargo run --example status_report
 ## Performance
 
 The plain path is allocation-free for a string literal — proven by a
-counting-allocator test (`tests/allocation.rs`), not asserted. Local Criterion
-means (Windows x86_64, release build):
+counting-allocator test (`tests/allocation.rs`), not asserted. Criterion means
+(Windows x86_64, release):
 
 | Operation | ns/op |
 |-----------|------:|
-| `out` plain write (`&str`) | ~10 |
-| builder render, named color + bold | ~50 |
-| builder render, 24-bit color | ~75 |
-| named-registry render | ~43 |
+| `out` plain write (`&str`) | ~9.5 |
+| `paint`, no styling | ~37 |
+| `paint`, named colour + bold | ~103 |
+| `paint`, 24-bit foreground and background | ~184 |
+| `markup`, four styled runs | ~234 |
+| themed line | ~167 |
+| `text::width`, styled | ~59 |
+| command parse, rich invocation | ~2500 |
 
 Styling costs more than the plain path because it builds an owned `String` and
-encodes escape sequences — a cost paid only when you opt into color. Reproduce
+encodes escape sequences — a cost paid only when colour is asked for. Reproduce
 with `cargo bench --bench bench`.
 
 <hr>
@@ -257,10 +441,11 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v1.0.0` is the **stable API freeze**: the public surface is guaranteed under
-Semantic Versioning — no breaking changes before `2.0`. `1.x` releases add only
-strictly-additive API, fixes, and internal optimization. See the SemVer promise in
-[`docs/API.md`](./docs/API.md#stability) and the [`ROADMAP`](./dev/ROADMAP.md).
+`v2.0.0`. The public surface is guaranteed under Semantic Versioning: no
+breaking changes before `3.0`. See the SemVer promise in
+[`docs/API.md`](./docs/API.md#stability), the
+[migration table](./CHANGELOG.md#migrating-from-1x), and the
+[`ROADMAP`](./dev/ROADMAP.md).
 
 <hr>
 <br>

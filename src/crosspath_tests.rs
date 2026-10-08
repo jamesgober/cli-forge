@@ -185,7 +185,7 @@ fn test_theme_level_renders_through_the_same_core() {
     // hands the result to the same primitive the builder uses.
     let style = Style::new().bright_green().bold();
     let theme = Theme::new()
-        .glyphs(Glyphs::Unicode)
+        .set_glyphs(Glyphs::Unicode)
         .set(Level::Success, style.clone(), "✓");
 
     for level in LEVELS {

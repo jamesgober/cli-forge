@@ -165,8 +165,8 @@ impl Color {
     /// The sixteen named variants resolve to the conventional xterm values, which
     /// is an approximation: the real pixels come from the user's colour scheme.
     /// Useful for computing contrast or blending, not for rendering — rendering
-    /// goes through [`write`](Color::write), which preserves the named form so the
-    /// user's own palette is honoured.
+    /// goes through [`Style::paint`](crate::Style::paint), which preserves the
+    /// named form so the user's own palette is honoured.
     ///
     /// # Examples
     ///
@@ -219,18 +219,11 @@ impl Color {
     /// been emitted, so separators land in the right places. Writes nothing at
     /// [`ColorLevel::None`].
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cli_forge::{Color, ColorLevel};
-    ///
-    /// let mut sgr = String::new();
-    /// let mut first = true;
-    /// Color::Red.write(&mut sgr, ColorLevel::Ansi16, false, &mut first).unwrap();
-    /// Color::White.write(&mut sgr, ColorLevel::Ansi16, true, &mut first).unwrap();
-    /// assert_eq!(sgr, "31;47");
-    /// ```
-    pub fn write<W: Write>(
+    /// Deliberately not public: the separator protocol is an internal detail of
+    /// how one escape sequence is assembled, and committing to it in the public
+    /// surface would fix it forever. A caller that wants to render a colour uses
+    /// [`Style::paint`](crate::Style::paint).
+    pub(crate) fn write<W: Write>(
         self,
         w: &mut W,
         level: ColorLevel,

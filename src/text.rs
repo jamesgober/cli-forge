@@ -476,8 +476,12 @@ fn wrap_paragraph<'a>(paragraph: &'a str, columns: usize, lines: &mut Vec<&'a st
             used += char_width(ch);
         }
 
-        // If the budget ran out exactly at a space, that space is the break.
-        if last_space.is_none() && rest[cut..].starts_with(char::is_whitespace) {
+        // If the budget ran out exactly at a space, that space is the break —
+        // and a better one than any earlier space, because it yields the longest
+        // line that fits. Checked unconditionally for that reason: preferring an
+        // earlier space would wrap `"a b c"` at 3 columns into `["a", "b c"]`
+        // when `["a b", "c"]` fits.
+        if rest[cut..].starts_with(char::is_whitespace) {
             last_space = Some(cut);
         }
 
@@ -604,6 +608,15 @@ mod tests {
         // Nothing fits, but the result is still valid and never panics.
         let cut = truncate("hello", 1, "...");
         assert_eq!(cut, "...");
+    }
+
+    #[test]
+    fn test_wrap_uses_the_last_space_that_fits() {
+        // The budget runs out exactly at a space, which is the longest line that
+        // fits; breaking at the earlier space would waste a column.
+        assert_eq!(wrap("a b c", 3), ["a b", "c"]);
+        assert_eq!(wrap("ab cd ef", 5), ["ab cd", "ef"]);
+        assert_eq!(wrap("a bb ccc", 6), ["a bb", "ccc"]);
     }
 
     #[test]

@@ -159,6 +159,10 @@ required-features = ["std"]
 name             = "allocation"
 required-features = ["std"]
 
+[[test]]
+name             = "readme"
+required-features = ["std"]
+
 
 # RELEASE PROFILE
 # #################################

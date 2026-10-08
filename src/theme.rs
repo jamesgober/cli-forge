@@ -26,7 +26,7 @@
 //! Theme::new()
 //!     .set(Level::Success, Style::new().bright_green().bold(), "✓")
 //!     .set(Level::Error, Style::new().bright_red().bold(), "✗")
-//!     .glyphs(Glyphs::Unicode)
+//!     .set_glyphs(Glyphs::Unicode)
 //!     .install();
 //! # }
 //! # #[cfg(not(feature = "std"))] fn main() {}
@@ -128,7 +128,7 @@ impl Level {
     /// Errors, warnings, and the two diagnostic levels go to standard error;
     /// everything else goes to standard output. That split is what lets a
     /// program's data be piped while its complaints still reach the user. A theme
-    /// can override it with [`Theme::stream`].
+    /// can override it with [`Theme::set_stream`].
     ///
     /// # Examples
     ///
@@ -177,15 +177,15 @@ impl Level {
 /// ```
 /// use cli_forge::{Glyphs, Level, Theme};
 ///
-/// let unicode = Theme::new().glyphs(Glyphs::Unicode);
+/// let unicode = Theme::new().set_glyphs(Glyphs::Unicode);
 /// assert_eq!(unicode.glyph(Level::Success), "✓");
 ///
 /// // The ASCII stand-ins are one column wide, so columns stay aligned.
-/// let ascii = Theme::new().glyphs(Glyphs::Ascii);
+/// let ascii = Theme::new().set_glyphs(Glyphs::Ascii);
 /// assert_eq!(ascii.glyph(Level::Success), "+");
 ///
 /// // Or no markers at all.
-/// assert_eq!(Theme::new().glyphs(Glyphs::None).glyph(Level::Success), "");
+/// assert_eq!(Theme::new().set_glyphs(Glyphs::None).glyph(Level::Success), "");
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum Glyphs {
@@ -332,7 +332,7 @@ impl Theme {
     /// Set a level's style and marker.
     ///
     /// Pass an empty `glyph` to leave the level unmarked. To keep the default
-    /// marker and change only the style, use [`style_for`](Theme::style_for).
+    /// marker and change only the style, use [`set_style`](Theme::set_style).
     ///
     /// # Examples
     ///
@@ -356,12 +356,12 @@ impl Theme {
     /// ```
     /// use cli_forge::{Level, Style, Theme};
     ///
-    /// let theme = Theme::new().style_for(Level::Info, Style::new().magenta());
+    /// let theme = Theme::new().set_style(Level::Info, Style::new().magenta());
     /// // The default marker is untouched.
     /// assert_eq!(theme.glyph(Level::Info), "i");
     /// ```
     #[must_use]
-    pub fn style_for(mut self, level: Level, style: Style) -> Theme {
+    pub fn set_style(mut self, level: Level, style: Style) -> Theme {
         self.styles[level.index()] = style;
         self
     }
@@ -376,11 +376,11 @@ impl Theme {
     /// ```
     /// use cli_forge::{Level, Stream, Theme};
     ///
-    /// let theme = Theme::new().stream(Level::Warning, Stream::Stdout);
-    /// assert_eq!(theme.stream_for(Level::Warning), Stream::Stdout);
+    /// let theme = Theme::new().set_stream(Level::Warning, Stream::Stdout);
+    /// assert_eq!(theme.stream(Level::Warning), Stream::Stdout);
     /// ```
     #[must_use]
-    pub fn stream(mut self, level: Level, stream: Stream) -> Theme {
+    pub fn set_stream(mut self, level: Level, stream: Stream) -> Theme {
         self.streams[level.index()] = stream;
         self
     }
@@ -392,10 +392,10 @@ impl Theme {
     /// ```
     /// use cli_forge::{Glyphs, Level, Theme};
     ///
-    /// assert_eq!(Theme::new().glyphs(Glyphs::Ascii).glyph(Level::Error), "x");
+    /// assert_eq!(Theme::new().set_glyphs(Glyphs::Ascii).glyph(Level::Error), "x");
     /// ```
     #[must_use]
-    pub fn glyphs(mut self, glyphs: Glyphs) -> Theme {
+    pub fn set_glyphs(mut self, glyphs: Glyphs) -> Theme {
         self.glyphs = glyphs;
         self
     }
@@ -423,10 +423,10 @@ impl Theme {
     /// ```
     /// use cli_forge::{Level, Stream, Theme};
     ///
-    /// assert_eq!(Theme::new().stream_for(Level::Error), Stream::Stderr);
+    /// assert_eq!(Theme::new().stream(Level::Error), Stream::Stderr);
     /// ```
     #[must_use]
-    pub fn stream_for(&self, level: Level) -> Stream {
+    pub fn stream(&self, level: Level) -> Stream {
         self.streams[level.index()]
     }
 
@@ -440,8 +440,8 @@ impl Theme {
     /// ```
     /// use cli_forge::{Glyphs, Level, Theme};
     ///
-    /// assert_eq!(Theme::new().glyphs(Glyphs::Unicode).glyph(Level::Success), "✓");
-    /// assert_eq!(Theme::new().glyphs(Glyphs::None).glyph(Level::Success), "");
+    /// assert_eq!(Theme::new().set_glyphs(Glyphs::Unicode).glyph(Level::Success), "✓");
+    /// assert_eq!(Theme::new().set_glyphs(Glyphs::None).glyph(Level::Success), "");
     /// ```
     #[must_use]
     pub fn glyph(&self, level: Level) -> &str {
@@ -475,7 +475,7 @@ impl Theme {
     /// ```
     #[must_use]
     pub fn render<T: Display>(&self, level: Level, value: T) -> String {
-        self.render_at(level, value, crate::terminal::level(self.stream_for(level)))
+        self.render_at(level, value, crate::terminal::level(self.stream(level)))
     }
 
     /// Render one line for `level` at an explicit colour depth.
@@ -488,7 +488,7 @@ impl Theme {
     /// ```
     /// use cli_forge::{ColorLevel, Level, Theme};
     ///
-    /// let theme = Theme::new().glyphs(cli_forge::Glyphs::Unicode);
+    /// let theme = Theme::new().set_glyphs(cli_forge::Glyphs::Unicode);
     /// let line = theme.render_at(Level::Success, "done", ColorLevel::None);
     /// assert_eq!(line, "✓ done");
     /// ```
@@ -514,7 +514,7 @@ impl Theme {
     /// # #[cfg(feature = "std")] fn main() {
     /// use cli_forge::{Glyphs, Theme};
     ///
-    /// Theme::new().glyphs(Glyphs::Ascii).install();
+    /// Theme::new().set_glyphs(Glyphs::Ascii).install();
     /// cli_forge::ok("installed");
     /// # Theme::new().install();
     /// # }
@@ -538,7 +538,7 @@ impl Theme {
     /// use cli_forge::{Level, Theme};
     ///
     /// let theme = Theme::current();
-    /// assert_eq!(theme.stream_for(Level::Error), cli_forge::Stream::Stderr);
+    /// assert_eq!(theme.stream(Level::Error), cli_forge::Stream::Stderr);
     /// # }
     /// # #[cfg(not(feature = "std"))] fn main() {}
     /// ```
@@ -582,7 +582,7 @@ pub(crate) fn emit<T: Display>(level: Level, value: T) {
     // The theme is read under a lock, so the line is built here and written
     // afterwards: no I/O happens while the lock is held.
     let (line, stream) = match active().read() {
-        Ok(theme) => (theme.render(level, value), theme.stream_for(level)),
+        Ok(theme) => (theme.render(level, value), theme.stream(level)),
         // A poisoned lock must not swallow the message; print it plainly.
         Err(_) => (format!("{value}"), level.stream()),
     };
@@ -742,16 +742,25 @@ mod tests {
     fn test_glyph_modes() {
         let theme = Theme::new();
         assert_eq!(
-            theme.clone().glyphs(Glyphs::Unicode).glyph(Level::Success),
+            theme
+                .clone()
+                .set_glyphs(Glyphs::Unicode)
+                .glyph(Level::Success),
             "✓"
         );
         assert_eq!(
-            theme.clone().glyphs(Glyphs::Ascii).glyph(Level::Success),
+            theme
+                .clone()
+                .set_glyphs(Glyphs::Ascii)
+                .glyph(Level::Success),
             "+"
         );
-        assert_eq!(theme.clone().glyphs(Glyphs::None).glyph(Level::Success), "");
+        assert_eq!(
+            theme.clone().set_glyphs(Glyphs::None).glyph(Level::Success),
+            ""
+        );
         // `Auto` picks one of the two, never something else.
-        let auto = theme.glyphs(Glyphs::Auto);
+        let auto = theme.set_glyphs(Glyphs::Auto);
         assert!(matches!(auto.glyph(Level::Success), "✓" | "+"));
     }
 
@@ -759,7 +768,7 @@ mod tests {
     fn test_custom_glyph_overrides_every_mode() {
         let theme = Theme::new().set(Level::Error, Style::new().red(), "FAIL");
         for mode in [Glyphs::Auto, Glyphs::Unicode, Glyphs::Ascii, Glyphs::None] {
-            assert_eq!(theme.clone().glyphs(mode).glyph(Level::Error), "FAIL");
+            assert_eq!(theme.clone().set_glyphs(mode).glyph(Level::Error), "FAIL");
         }
     }
 
@@ -775,8 +784,8 @@ mod tests {
     #[test]
     fn test_render_puts_glyph_and_text_in_one_span() {
         let theme = Theme::new()
-            .glyphs(Glyphs::Unicode)
-            .style_for(Level::Success, Style::new().green());
+            .set_glyphs(Glyphs::Unicode)
+            .set_style(Level::Success, Style::new().green());
         assert_eq!(
             theme.render_at(Level::Success, "done", ColorLevel::Ansi16),
             "\x1b[32m✓ done\x1b[0m"
@@ -795,15 +804,15 @@ mod tests {
             assert!(plain.style(level).is_plain());
         }
         // The stream split survives, because it is correctness, not appearance.
-        assert_eq!(plain.stream_for(Level::Error), Stream::Stderr);
+        assert_eq!(plain.stream(Level::Error), Stream::Stderr);
     }
 
     #[test]
     fn test_stream_override() {
-        let theme = Theme::new().stream(Level::Warning, Stream::Stdout);
-        assert_eq!(theme.stream_for(Level::Warning), Stream::Stdout);
+        let theme = Theme::new().set_stream(Level::Warning, Stream::Stdout);
+        assert_eq!(theme.stream(Level::Warning), Stream::Stdout);
         // Other levels are untouched.
-        assert_eq!(theme.stream_for(Level::Error), Stream::Stderr);
+        assert_eq!(theme.stream(Level::Error), Stream::Stderr);
     }
 
     #[test]
@@ -837,7 +846,7 @@ mod tests {
     fn test_install_and_current_round_trip() {
         // Leave the process theme as it was found, so test order cannot matter.
         let saved = Theme::current();
-        Theme::new().glyphs(Glyphs::Ascii).install();
+        Theme::new().set_glyphs(Glyphs::Ascii).install();
         assert_eq!(Theme::current().glyph(Level::Success), "+");
         saved.install();
     }

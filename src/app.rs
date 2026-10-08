@@ -331,7 +331,7 @@ impl App {
     /// ```
     /// use cli_forge::{App, Command, Glyphs, Theme};
     ///
-    /// let mut app = App::new("demo").theme(Theme::new().glyphs(Glyphs::Ascii));
+    /// let mut app = App::new("demo").theme(Theme::new().set_glyphs(Glyphs::Ascii));
     /// app.register(Command::new("build"));
     /// let _ = app.try_parse_from(["build"]);
     /// # Theme::new().install();

@@ -32,7 +32,7 @@ fn main() {
         )
         .set(Level::Error, Style::new().white().on_red().bold(), " ER ")
         .set(Level::Warning, Style::new().black().on_yellow(), " WARN ")
-        .style_for(Level::Info, Style::new().bright_blue().italic())
+        .set_style(Level::Info, Style::new().bright_blue().italic())
         .install();
     every_level();
 
@@ -43,7 +43,7 @@ fn main() {
             .underline(),
     );
     out("");
-    Theme::new().glyphs(Glyphs::Ascii).install();
+    Theme::new().set_glyphs(Glyphs::Ascii).install();
     every_level();
 
     out("");
@@ -57,11 +57,11 @@ fn main() {
     // A theme is a value, so a library can render through its own without
     // disturbing the host program's.
     out("");
-    let mine = Theme::new().glyphs(Glyphs::Unicode);
+    let mine = Theme::new().set_glyphs(Glyphs::Unicode);
     out(mine.render(Level::Hint, "rendered through a theme held locally"));
 
     // And a level can be redirected when the convention does not suit.
-    let warnings_in_band = Theme::new().stream(Level::Warning, Stream::Stdout);
+    let warnings_in_band = Theme::new().set_stream(Level::Warning, Stream::Stdout);
     out(warnings_in_band.render(Level::Warning, "this one would go to stdout"));
 }
 

@@ -1123,7 +1123,7 @@ mod tests {
         // The table replaced integer formatting, so a typo in it would now be a
         // silently wrong escape sequence rather than a compile error.
         let expected = ["1", "2", "3", "4", "5", "7", "8", "9"];
-        let actual: Vec<&str> = ATTRIBUTES.iter().map(|&(_, p)| p).collect();
+        let actual: crate::shim::Vec<&str> = ATTRIBUTES.iter().map(|&(_, p)| p).collect();
         assert_eq!(actual, expected);
     }
 }

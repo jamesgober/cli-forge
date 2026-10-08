@@ -19,13 +19,13 @@ use cli_forge::{Level, Style, Theme, define, fail, markup, named, note, ok, out,
 
 fn main() {
     // The program's vocabulary, stated once.
-    // `style_for` changes the colour and leaves the marker to the theme, so the
+    // `set_style` changes the colour and leaves the marker to the theme, so the
     // Unicode-or-ASCII decision stays automatic. `set` would pin the glyph and
     // take that choice away, which is right for a brand mark and wrong here.
     Theme::new()
-        .style_for(Level::Success, Style::new().bright_green().bold())
-        .style_for(Level::Warning, Style::new().bright_yellow().bold())
-        .style_for(Level::Error, Style::new().bright_red().bold())
+        .set_style(Level::Success, Style::new().bright_green().bold())
+        .set_style(Level::Warning, Style::new().bright_yellow().bold())
+        .set_style(Level::Error, Style::new().bright_red().bold())
         .set(Level::Note, Style::new().bright_black(), "")
         .install();
 

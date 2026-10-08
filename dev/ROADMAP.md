@@ -94,3 +94,67 @@ this frozen base.
 Exit criteria:
 - [x] `docs/API.md` marked stable; SemVer promise recorded. (See the Stability section.)
 - [x] Full test + benchmark suite green on all three platforms. (Windows + Linux verified directly; macOS via the CI matrix on the shared non-Windows path. Output + command-parse benchmarks green.)
+---
+
+## v2.0.0 — Themed output, the argument model, the suite seams (DONE)
+
+The 1.0 freeze held until it was in the way. Three things forced a major:
+
+1. **Output was not reusable.** A named style carried colour only, so every
+   status line in a program rebuilt its own marker by hand — the duplication the
+   1.x `status_report` example demonstrated rather than solved.
+2. **The argument model was too thin for a real CLI**, and four confirmed defects
+   each made a legitimate command line unparseable.
+3. **The crate could not serve as the suite's base.** There was no way to measure
+   styled text, no way to override colour, and no public accessor on `App`,
+   `Command`, or `Arg` — so a completions or manual-page crate could not read the
+   command tree at all.
+
+Exit criteria:
+
+- [x] A theme states a program's vocabulary once; no call site names a colour.
+      (`Theme`, `Level`, `Glyphs`, and the eight printers. `examples/theme.rs`
+      restyles a whole report by replacing the theme.)
+- [x] A style carries its whole appearance, so a marker is described once.
+      (`prefix`/`suffix`/`pad_to`/`align`/`link`/`merge` + `paint`;
+      `examples/status_report.rs` rewritten to show the difference.)
+- [x] All four styling paths render byte-identical output for the same intent,
+      at every colour depth (`src/crosspath_tests.rs`).
+- [x] Each of the four parser defects reproduced, then fixed, with a regression
+      test naming the 1.x behaviour (`src/app/tests.rs`).
+- [x] Values validated at the edge, so reading them back cannot fail for a reason
+      the user caused (`Arg::validate`/`possible_values`, `Matches::get`).
+- [x] Errors carry a suggestion and a usage line; help and version exit `0` on
+      standard output, a bad command line exits `2`.
+- [x] Parsing and dispatch separated; `App::run` returns an `ExitCode`.
+- [x] Help aligned in display columns and wrapped to the terminal.
+- [x] The measurement seam exists and is public (`text`), and the command tree is
+      readable from outside (the read-only accessors).
+- [x] `--no-default-features` is a real `no_std` build with its own passing suite,
+      not an empty crate.
+- [x] Untrusted text can be printed safely (`text::sanitize`).
+- [x] Eight feature combinations green in CI; MSRV 1.85 verified; `fmt`, `clippy
+      -D warnings`, `cargo doc -D warnings` clean on each.
+- [x] Styling measurably faster, with criterion numbers, and no regression on the
+      plain path.
+- [x] The README's examples compiled and run as a test, so they cannot rot.
+
+---
+
+## Next
+
+The core is the base; the extensions are separate crates that drop onto these
+seams. Nothing below belongs in this crate.
+
+- `cli-table` — tables and grids, measuring through `text::width`.
+- `cli-progress` — bars and spinners, styled through `Theme` and sized through
+  `terminal::size`.
+- `cli-complete` — shell completions, generated from the read-only command tree.
+- `cli-man` — manual pages, from the same tree.
+- `cli-prompt` — interactive input: confirm, select, password.
+- `cli-gradient` — gradient and multi-stop colour over `Color`.
+- `cli-suite` — the umbrella crate combining them behind feature flags.
+
+The one thing to hold to: each of those consumes this crate's public seams and
+adds nothing to it. If an extension needs something the core does not expose, the
+core gets a minor, additive release — not a copy of the seam.
