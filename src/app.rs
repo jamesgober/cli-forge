@@ -595,6 +595,24 @@ mod tests {
         assert_eq!(run.value("nope"), None);
     }
 
+    /// A rendered page with its ANSI escapes removed. Section headings are
+    /// styled, so a raw page only reads as plain text when the test process
+    /// happens to have a color-incapable stdout — assertions that span a
+    /// heading boundary must go through this.
+    fn plain(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find('\x1b') {
+            out.push_str(&rest[..start]);
+            rest = match rest[start..].find('m') {
+                Some(end) => &rest[start + end + 1..],
+                None => "",
+            };
+        }
+        out.push_str(rest);
+        out
+    }
+
     fn help_demo() -> App {
         let mut app = App::new("demo")
             .version("1.0.0")
@@ -613,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_help_respects_header_footer_and_lists_options() {
-        let help = help_demo().help();
+        let help = plain(&help_demo().help());
         assert!(help.contains("HEADER LINE"));
         assert!(help.contains("FOOTER LINE"));
         assert!(help.contains("USAGE: demo <command> [options]"));
@@ -623,7 +641,7 @@ mod tests {
 
     #[test]
     fn test_help_hides_hidden_commands() {
-        let help = help_demo().help();
+        let help = plain(&help_demo().help());
         assert!(help.contains("build"));
         assert!(help.contains("compile the project"));
         // Hidden commands are always absent from help.
@@ -636,13 +654,13 @@ mod tests {
     fn test_help_shows_auth_command_without_auth_feature() {
         // Without the `auth` feature, `requires_auth` is inert — the command is
         // listed like any other.
-        let help = help_demo().help();
+        let help = plain(&help_demo().help());
         assert!(help.contains("publish"));
     }
 
     #[test]
     fn test_help_shows_command_aliases() {
-        let help = help_demo().help();
+        let help = plain(&help_demo().help());
         assert!(help.contains("remove, rm, del"));
     }
 
@@ -650,7 +668,7 @@ mod tests {
     fn test_help_omits_version_line_without_version() {
         let mut app = App::new("demo");
         app.register(Command::new("build"));
-        let help = app.help();
+        let help = plain(&app.help());
         assert!(help.contains("-h, --help"));
         assert!(!help.contains("--version"));
     }
