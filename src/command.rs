@@ -590,18 +590,21 @@ impl Command {
 
     /// Find an argument by its long form, searching `extra` as well — the app's
     /// global arguments, which every command accepts.
-    pub(crate) fn find_long<'a>(&'a self, long: &str, extra: &'a [Arg]) -> Option<&'a Arg> {
+    ///
+    /// `extra` holds borrows rather than values so that the caller can assemble
+    /// it without copying the arguments themselves.
+    pub(crate) fn find_long<'a>(&'a self, long: &str, extra: &[&'a Arg]) -> Option<&'a Arg> {
         self.args
             .iter()
-            .chain(extra)
+            .chain(extra.iter().copied())
             .find(|a| a.long_name() == Some(long))
     }
 
     /// Find an argument by its short form, searching `extra` as well.
-    pub(crate) fn find_short<'a>(&'a self, short: char, extra: &'a [Arg]) -> Option<&'a Arg> {
+    pub(crate) fn find_short<'a>(&'a self, short: char, extra: &[&'a Arg]) -> Option<&'a Arg> {
         self.args
             .iter()
-            .chain(extra)
+            .chain(extra.iter().copied())
             .find(|a| a.short == Some(short))
     }
 
@@ -676,7 +679,8 @@ mod tests {
     #[test]
     fn test_argument_lookup_searches_globals_too() {
         let cmd = Command::new("build").arg(Arg::flag("release").short('r'));
-        let globals = [Arg::count("verbose").short('v')];
+        let verbose = Arg::count("verbose").short('v');
+        let globals = [&verbose];
 
         assert_eq!(
             cmd.find_long("release", &globals).map(|a| a.name.as_str()),
@@ -703,7 +707,8 @@ mod tests {
         // The command's arguments are searched first, so a command can override
         // an app-level spelling rather than being stuck with it.
         let cmd = Command::new("build").arg(Arg::option("verbose"));
-        let globals = [Arg::count("verbose")];
+        let verbose = Arg::count("verbose");
+        let globals = [&verbose];
         let found = cmd.find_long("verbose", &globals).unwrap();
         assert_eq!(found.kind, ArgKind::Option);
     }

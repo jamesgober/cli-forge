@@ -52,6 +52,7 @@
 use std::sync::Arc;
 
 use crate::error::{ErrorKind, ParseError, did_you_mean};
+use crate::shim::String;
 
 /// Which form an [`Arg`] takes on the command line.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -804,13 +805,15 @@ impl Arg {
 
     /// Check `value` against the allowed set and the validator.
     ///
-    /// `written_as` is the flag as the user typed it, so the error names what
-    /// they wrote rather than the internal name.
-    pub(crate) fn check(&self, value: &str, written_as: &str) -> Result<(), ParseError> {
+    /// `written` is how the user named this argument, so the error says what they
+    /// wrote rather than the internal name. It is passed unformatted because the
+    /// happy path is every value that parses: building the display form eagerly
+    /// meant a string allocation per flag for a message almost never shown.
+    pub(crate) fn check(&self, value: &str, written: Written<'_>) -> Result<(), ParseError> {
         if !self.possible.is_empty() && !self.possible.iter().any(|allowed| allowed == value) {
             let allowed = self.possible.join(", ");
             let mut error = ParseError::new(ErrorKind::InvalidValue, value).with_detail(
-                crate::shim::format!("'{written_as}' accepts one of: {allowed}"),
+                crate::shim::format!("'{}' accepts one of: {allowed}", written.display()),
             );
             if let Some(nearest) = did_you_mean(value, self.possible.iter().map(String::as_str)) {
                 error = error.with_suggestion(nearest);
@@ -820,10 +823,38 @@ impl Arg {
         if let Some(validator) = &self.validator {
             if let Err(complaint) = validator(value) {
                 return Err(ParseError::new(ErrorKind::InvalidValue, value)
-                    .with_detail(crate::shim::format!("{written_as}: {complaint}")));
+                    .with_detail(crate::shim::format!("{}: {complaint}", written.display())));
             }
         }
         Ok(())
+    }
+}
+
+/// How the user named an argument, for an error message.
+///
+/// Carried unformatted so that the common case — a value that is fine — costs
+/// nothing. Only the failing branch builds a string.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Written<'a> {
+    /// A `--long` flag, named without its dashes.
+    Long(&'a str),
+    /// A `-s` flag.
+    Short(char),
+    /// A positional, or a default, named by the argument's own name.
+    Name(&'a str),
+    /// An environment variable, named without its sigil.
+    Env(&'a str),
+}
+
+impl Written<'_> {
+    /// The form to show the user.
+    pub(crate) fn display(self) -> crate::shim::String {
+        match self {
+            Written::Long(name) => crate::shim::format!("--{name}"),
+            Written::Short(c) => crate::shim::format!("-{c}"),
+            Written::Name(name) => crate::shim::ToString::to_string(name),
+            Written::Env(name) => crate::shim::format!("${name}"),
+        }
     }
 }
 
@@ -891,10 +922,10 @@ mod tests {
     #[test]
     fn test_possible_values_accepts_members_and_rejects_others() {
         let arg = Arg::option("level").possible_values(["warn", "info"]);
-        assert!(arg.check("warn", "--level").is_ok());
-        assert!(arg.check("info", "--level").is_ok());
+        assert!(arg.check("warn", Written::Long("level")).is_ok());
+        assert!(arg.check("info", Written::Long("level")).is_ok());
 
-        let error = arg.check("trace", "--level").unwrap_err();
+        let error = arg.check("trace", Written::Long("level")).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidValue);
         assert_eq!(error.subject(), "trace");
         // The report names the flag as written and the whole allowed set.
@@ -907,12 +938,16 @@ mod tests {
     fn test_a_near_miss_in_a_fixed_set_is_corrected() {
         let arg = Arg::option("level").possible_values(["warn", "info", "debug"]);
         assert_eq!(
-            arg.check("inof", "--level").unwrap_err().suggestion(),
+            arg.check("inof", Written::Long("level"))
+                .unwrap_err()
+                .suggestion(),
             Some("info")
         );
         // Nothing close enough gets no suggestion rather than a misleading one.
         assert_eq!(
-            arg.check("xyzzy", "--level").unwrap_err().suggestion(),
+            arg.check("xyzzy", Written::Long("level"))
+                .unwrap_err()
+                .suggestion(),
             None
         );
     }
@@ -925,9 +960,9 @@ mod tests {
                 .map(|_| ())
                 .map_err(|_| "expected a port number".to_string())
         });
-        assert!(arg.check("8080", "--port").is_ok());
+        assert!(arg.check("8080", Written::Long("port")).is_ok());
 
-        let error = arg.check("http", "--port").unwrap_err();
+        let error = arg.check("http", Written::Long("port")).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidValue);
         assert!(error.detail().unwrap().contains("expected a port number"));
         assert!(error.report().contains("--port"));
@@ -939,7 +974,7 @@ mod tests {
         let arg = Arg::option("mode")
             .possible_values(["fast"])
             .validate(|_| Err("validator should not run".to_string()));
-        let error = arg.check("slow", "--mode").unwrap_err();
+        let error = arg.check("slow", Written::Long("mode")).unwrap_err();
         assert!(error.detail().unwrap().contains("accepts one of"));
     }
 
@@ -947,7 +982,10 @@ mod tests {
     fn test_an_unconstrained_argument_accepts_anything() {
         let arg = Arg::option("message");
         for value in ["", "anything", "--looks-like-a-flag", "日本語"] {
-            assert!(arg.check(value, "--message").is_ok(), "{value:?}");
+            assert!(
+                arg.check(value, Written::Long("message")).is_ok(),
+                "{value:?}"
+            );
         }
     }
 

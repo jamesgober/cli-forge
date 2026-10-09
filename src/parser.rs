@@ -27,7 +27,7 @@
 //!   Anything else surprises someone, and which one happened is recorded on the
 //!   value so the program can tell.
 
-use crate::arg::{Arg, ArgKind};
+use crate::arg::{Arg, ArgKind, Written};
 use crate::command::Command;
 use crate::error::{ErrorKind, ParseError, did_you_mean};
 use crate::help;
@@ -55,14 +55,19 @@ pub(crate) struct Cli<'a> {
     pub(crate) authorizer: Option<&'a crate::auth::AuthHook>,
 }
 
-impl Cli<'_> {
+impl<'a> Cli<'a> {
     /// The app-level arguments a subcommand inherits.
-    fn inherited(&self) -> Vec<Arg> {
-        self.globals
-            .iter()
-            .filter(|arg| arg.global)
-            .cloned()
-            .collect()
+    ///
+    /// Borrowed rather than cloned, and built once per parse rather than once per
+    /// command level: `parse_command` recurses, so cloning here charged every
+    /// level for a deep copy of every global argument.
+    fn inherited(&self) -> Vec<&'a Arg> {
+        self.globals.iter().filter(|arg| arg.global).collect()
+    }
+
+    /// Every app-level argument, inherited or not. Only the app level sees these.
+    fn app_level(&self) -> Vec<&'a Arg> {
+        self.globals.iter().collect()
     }
 }
 
@@ -115,7 +120,7 @@ fn is_version(token: &str) -> bool {
 /// and `-5` or `-.5` is a number unless the command really does declare a short
 /// flag by that character — which is the distinction that makes a calculator or a
 /// seek offset expressible at all.
-fn is_flag_like(token: &str, command: &Command, globals: &[Arg]) -> bool {
+fn is_flag_like(token: &str, command: &Command, globals: &[&Arg]) -> bool {
     if token == "-" || !token.starts_with('-') || token.len() < 2 {
         return false;
     }
@@ -138,10 +143,10 @@ fn record(
     matches: &mut Matches,
     arg: &Arg,
     value: String,
-    written_as: &str,
+    written: Written<'_>,
     source: ValueSource,
 ) -> Result<(), ParseError> {
-    arg.check(&value, written_as)?;
+    arg.check(&value, written)?;
     if arg.multiple {
         matches
             .values
@@ -157,9 +162,15 @@ fn record(
 
 /// Increment a counting flag's tally, saturating rather than overflowing on
 /// pathological input.
+///
+/// Looks the key up before reaching for `entry`, because `entry` needs an owned
+/// key and `-vvv` would otherwise allocate the name once per repeat.
 fn bump_count(matches: &mut Matches, name: &str) {
-    let counter = matches.counts.entry(name.to_owned()).or_insert(0);
-    *counter = counter.saturating_add(1);
+    if let Some(counter) = matches.counts.get_mut(name) {
+        *counter = counter.saturating_add(1);
+        return;
+    }
+    let _ = matches.counts.insert(name.to_owned(), 1);
 }
 
 /// Mark a boolean flag as set.
@@ -179,6 +190,10 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
     // A synthetic command standing in for the app level, so one code path
     // handles `--long value` whether it was written before or after a command.
     let app_level = Command::new(cli.app_name);
+    // Both sets are built once here: the app level accepts all of its own
+    // arguments, and subcommands inherit the ones marked global.
+    let app_args = cli.app_level();
+    let inherited = cli.inherited();
     let mut command_parsed: Option<(String, Matches)> = None;
     let mut i = 0;
     let mut end_of_options = false;
@@ -203,12 +218,12 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
                     return Err(ParseError::request(ErrorKind::VersionRequested, version));
                 }
             }
-            if is_flag_like(token, &app_level, cli.globals) {
+            if is_flag_like(token, &app_level, &app_args) {
                 let mut sink = Sink {
                     level: &mut root,
                     globals: &mut globals,
                 };
-                i = parse_flag(cli, &app_level, cli.globals, &mut sink, tokens, i)
+                i = parse_flag(cli, &app_level, &app_args, &mut sink, tokens, i)
                     .map_err(|error| error.with_usage(help::usage_app(cli)))?;
                 continue;
             }
@@ -229,6 +244,7 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
             command,
             &tokens[i + 1..],
             &mut globals,
+            &inherited,
         )?;
         command_parsed = Some((command.name.clone(), sub));
         break;
@@ -242,8 +258,7 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
             level: &mut root,
             globals: &mut globals,
         };
-        let declared: Vec<&Arg> = cli.globals.iter().collect();
-        finalize(&app_level, &declared, &mut sink, false)
+        finalize(&app_level, &app_args, &mut sink, false)
             .map_err(|error| error.with_usage(help::usage_app(cli)))?;
     }
 
@@ -323,8 +338,8 @@ pub(crate) fn parse_command(
     command: &Command,
     tokens: &[String],
     globals: &mut Matches,
+    inherited: &[&Arg],
 ) -> Result<Matches, ParseError> {
-    let inherited = cli.inherited();
     let usage = || help::usage_command(cli, path, command);
 
     let mut level = Matches::default();
@@ -347,8 +362,8 @@ pub(crate) fn parse_command(
             // Help and version short-circuit, unless the command declares a
             // conflicting argument by the same name.
             if is_help(token)
-                && command.find_long("help", &inherited).is_none()
-                && command.find_short('h', &inherited).is_none()
+                && command.find_long("help", inherited).is_none()
+                && command.find_short('h', inherited).is_none()
             {
                 return Err(ParseError::request(
                     ErrorKind::HelpRequested,
@@ -357,19 +372,19 @@ pub(crate) fn parse_command(
             }
             if let Some(version) = cli.version {
                 if is_version(token)
-                    && command.find_long("version", &inherited).is_none()
-                    && command.find_short('V', &inherited).is_none()
+                    && command.find_long("version", inherited).is_none()
+                    && command.find_short('V', inherited).is_none()
                 {
                     return Err(ParseError::request(ErrorKind::VersionRequested, version));
                 }
             }
 
-            if is_flag_like(token, command, &inherited) {
+            if is_flag_like(token, command, inherited) {
                 let mut sink = Sink {
                     level: &mut level,
                     globals,
                 };
-                i = parse_flag(cli, command, &inherited, &mut sink, tokens, i)
+                i = parse_flag(cli, command, inherited, &mut sink, tokens, i)
                     .map_err(|error| error.with_usage(usage()))?;
                 continue;
             }
@@ -382,7 +397,7 @@ pub(crate) fn parse_command(
                     let mut sub_path = path.to_vec();
                     sub_path.push(sub.name.as_str());
                     let sub_matches =
-                        parse_command(cli, &sub_path, sub, &tokens[i + 1..], globals)?;
+                        parse_command(cli, &sub_path, sub, &tokens[i + 1..], globals, inherited)?;
                     subcommand = Some((sub.name.clone(), sub_matches));
                     break;
                 }
@@ -400,7 +415,7 @@ pub(crate) fn parse_command(
                 target,
                 arg,
                 token.clone(),
-                &arg.name,
+                Written::Name(&arg.name),
                 ValueSource::CommandLine,
             )
             .map_err(|error| error.with_usage(usage()))?;
@@ -472,7 +487,7 @@ fn surplus(command: &Command, token: &str) -> ParseError {
 fn parse_flag(
     cli: &Cli,
     command: &Command,
-    extra: &[Arg],
+    extra: &[&Arg],
     sink: &mut Sink,
     tokens: &[String],
     i: usize,
@@ -488,7 +503,7 @@ fn parse_flag(
 fn parse_long(
     cli: &Cli,
     command: &Command,
-    extra: &[Arg],
+    extra: &[&Arg],
     sink: &mut Sink,
     body: &str,
     tokens: &[String],
@@ -498,14 +513,14 @@ fn parse_long(
         Some((name, value)) => (name, Some(value)),
         None => (body, None),
     };
-    let written_as = crate::shim::format!("--{name}");
+    let written = Written::Long(name);
 
     let Some(arg) = command.find_long(name, extra) else {
         let mut error = ParseError::new(ErrorKind::UnknownFlag, crate::shim::format!("--{body}"));
         let candidates: Vec<&str> = command
             .args
             .iter()
-            .chain(extra)
+            .chain(extra.iter().copied())
             .filter(|a| !a.hidden)
             .filter_map(Arg::long_name)
             .chain(["help"])
@@ -524,7 +539,7 @@ fn parse_long(
                     ErrorKind::UnexpectedArgument,
                     crate::shim::format!("--{body}"),
                 )
-                .with_detail(crate::shim::format!("'{written_as}' takes no value")));
+                .with_detail(crate::shim::format!("'--{name}' takes no value")));
             }
             let kind = arg.kind;
             let target = sink.target(arg);
@@ -542,7 +557,7 @@ fn parse_long(
                     sink.target(arg),
                     arg,
                     owned,
-                    &written_as,
+                    written,
                     ValueSource::CommandLine,
                 )?;
                 Ok(i + 1)
@@ -550,13 +565,13 @@ fn parse_long(
             None => {
                 let value = tokens
                     .get(i + 1)
-                    .ok_or_else(|| ParseError::new(ErrorKind::MissingValue, &written_as))?
+                    .ok_or_else(|| ParseError::new(ErrorKind::MissingValue, written.display()))?
                     .clone();
                 record(
                     sink.target(arg),
                     arg,
                     value,
-                    &written_as,
+                    written,
                     ValueSource::CommandLine,
                 )?;
                 Ok(i + 2)
@@ -575,7 +590,7 @@ fn parse_long(
 /// `-ovalue`).
 fn parse_short(
     command: &Command,
-    extra: &[Arg],
+    extra: &[&Arg],
     sink: &mut Sink,
     token: &str,
     tokens: &[String],
@@ -586,9 +601,12 @@ fn parse_short(
 
     while idx < chars.len() {
         let c = chars[idx];
-        let written_as = crate::shim::format!("-{c}");
+        let written = Written::Short(c);
         let Some(arg) = command.find_short(c, extra) else {
-            return Err(ParseError::new(ErrorKind::UnknownFlag, &written_as));
+            return Err(ParseError::new(
+                ErrorKind::UnknownFlag,
+                crate::shim::format!("-{c}"),
+            ));
         };
 
         match arg.kind {
@@ -606,13 +624,13 @@ fn parse_short(
                 if rest.is_empty() {
                     let value = tokens
                         .get(i + 1)
-                        .ok_or_else(|| ParseError::new(ErrorKind::MissingValue, &written_as))?
+                        .ok_or_else(|| ParseError::new(ErrorKind::MissingValue, written.display()))?
                         .clone();
                     record(
                         sink.target(arg),
                         arg,
                         value,
-                        &written_as,
+                        written,
                         ValueSource::CommandLine,
                     )?;
                     return Ok(i + 2);
@@ -624,14 +642,14 @@ fn parse_short(
                     sink.target(arg),
                     arg,
                     value,
-                    &written_as,
+                    written,
                     ValueSource::CommandLine,
                 )?;
                 return Ok(i + 1);
             }
             // `find_short` never returns a positional.
             ArgKind::Positional => {
-                return Err(ParseError::new(ErrorKind::UnknownFlag, &written_as));
+                return Err(ParseError::new(ErrorKind::UnknownFlag, written.display()));
             }
         }
     }
@@ -657,20 +675,28 @@ fn finalize(
                 continue;
             }
             if let Some(value) = env_value(arg) {
-                let written_as = written_as_env(arg);
+                let written = match arg.env.as_deref() {
+                    Some(name) => Written::Env(name),
+                    None => Written::Name(&arg.name),
+                };
                 record(
                     sink.target(arg),
                     arg,
                     value,
-                    &written_as,
+                    written,
                     ValueSource::Environment,
                 )?;
                 continue;
             }
             if let Some(default) = &arg.default {
                 let value = default.clone();
-                let name = arg.name.clone();
-                record(sink.target(arg), arg, value, &name, ValueSource::Default)?;
+                record(
+                    sink.target(arg),
+                    arg,
+                    value,
+                    Written::Name(&arg.name),
+                    ValueSource::Default,
+                )?;
                 continue;
             }
         } else {
@@ -717,14 +743,6 @@ fn env_value(arg: &Arg) -> Option<String> {
     // A variable set to the empty string is treated as unset, which is what lets
     // a shell clear an inherited value with `VAR=`.
     std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
-/// How to name an environment variable in an error about its value.
-fn written_as_env(arg: &Arg) -> String {
-    match arg.env.as_deref() {
-        Some(name) => crate::shim::format!("${name}"),
-        None => arg.name.clone(),
-    }
 }
 
 /// Whether an environment value counts as setting a flag.
@@ -799,7 +817,8 @@ mod tests {
 
     #[test]
     fn test_a_global_can_claim_a_numeric_short() {
-        let globals = [Arg::flag("one").short('1')];
+        let one = Arg::flag("one").short('1');
+        let globals = [&one];
         assert!(is_flag_like("-1", &Command::new("c"), &globals));
     }
 
@@ -814,10 +833,13 @@ mod tests {
     }
 
     #[test]
-    fn test_env_name_is_shown_with_a_dollar_in_errors() {
-        let arg = Arg::option("token").env("FORGE_TOKEN");
-        assert_eq!(written_as_env(&arg), "$FORGE_TOKEN");
-        assert_eq!(written_as_env(&Arg::option("plain")), "plain");
+    fn test_written_forms_are_only_built_on_failure() {
+        // The display form exists for error messages; the happy path never
+        // builds one, which is why `Written` is carried unformatted.
+        assert_eq!(Written::Long("level").display(), "--level");
+        assert_eq!(Written::Short('j').display(), "-j");
+        assert_eq!(Written::Name("path").display(), "path");
+        assert_eq!(Written::Env("FORGE_TOKEN").display(), "$FORGE_TOKEN");
     }
 
     #[test]
