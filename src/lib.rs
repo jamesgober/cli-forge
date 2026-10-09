@@ -146,6 +146,12 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+// The tests may use `std` even when the library is built without it: the test
+// harness needs it anyway, and the lock that serialises tests touching
+// process-wide state is a `std::sync::Mutex`. Shipping code never sees this.
+#[cfg(all(test, not(feature = "std")))]
+extern crate std;
+
 /// The owning types the crate uses, sourced from `alloc` or `std` depending on
 /// the build.
 ///
