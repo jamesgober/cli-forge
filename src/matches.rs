@@ -86,6 +86,9 @@ pub struct Matches {
     pub(crate) sources: HashMap<String, ValueSource>,
     /// For each argument group, the member that answered it.
     pub(crate) groups: HashMap<String, String>,
+    /// A command name the app does not define, and the tokens after it, when
+    /// external subcommands are enabled.
+    pub(crate) external: Option<(String, Vec<String>)>,
     pub(crate) subcommand: Option<(String, Box<Matches>)>,
 }
 
@@ -402,6 +405,33 @@ impl Matches {
     #[must_use]
     pub fn group(&self, name: &str) -> Option<&str> {
         self.groups.get(name).map(String::as_str)
+    }
+
+    /// The name and raw arguments of an external subcommand, if that is what the
+    /// invocation resolved to.
+    ///
+    /// Only ever set when [`App::external`](crate::App::external) is enabled. The
+    /// arguments are exactly the tokens after the name, unparsed. Useful for a
+    /// program that parses and dispatches in separate steps; with a hook set,
+    /// [`App::run`](crate::App::run) and [`App::try_run_from`](crate::App::try_run_from)
+    /// call it for you.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let app = App::new("forge").external(|_| {}).command(Command::new("build"));
+    ///
+    /// let m = app.try_parse_from(["watch", "--clear"]).unwrap();
+    /// assert_eq!(m.external(), Some(("watch", &["--clear".to_string()][..])));
+    /// assert_eq!(m.subcommand_name(), None);
+    /// ```
+    #[must_use]
+    pub fn external(&self) -> Option<(&str, &[String])> {
+        self.external
+            .as_ref()
+            .map(|(name, args)| (name.as_str(), args.as_slice()))
     }
 
     /// The invoked subcommand's name and its own [`Matches`], if one was given.

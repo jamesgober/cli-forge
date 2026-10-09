@@ -1235,6 +1235,140 @@ fn test_a_hidden_command_still_runs() {
 }
 
 // ---------------------------------------------------------------------------
+// External subcommands
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_an_unknown_name_reaches_the_external_hook_untouched() {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    let app = App::new("forge")
+        .external(|ext| {
+            let mut seen = SEEN.lock().unwrap();
+            seen.push(ext.name().to_owned());
+            seen.extend(ext.args().iter().cloned());
+        })
+        .command(Command::new("build"));
+
+    assert!(
+        app.try_run_from(["watch", "--clear", "-x", "src"])
+            .unwrap()
+            .is_ok()
+    );
+    // Everything after the name, flags included, is passed through unparsed.
+    assert_eq!(*SEEN.lock().unwrap(), ["watch", "--clear", "-x", "src"]);
+}
+
+#[test]
+fn test_registered_commands_never_reach_the_hook() {
+    static HOOKED: AtomicUsize = AtomicUsize::new(0);
+    static BUILT: AtomicUsize = AtomicUsize::new(0);
+    let app = App::new("forge")
+        .external(|_| {
+            let _ = HOOKED.fetch_add(1, Ordering::SeqCst);
+        })
+        .command(Command::new("build").alias("b").run(|_| {
+            let _ = BUILT.fetch_add(1, Ordering::SeqCst);
+        }));
+
+    assert!(app.try_run_from(["build"]).unwrap().is_ok());
+    assert!(app.try_run_from(["b"]).unwrap().is_ok());
+    assert_eq!(BUILT.load(Ordering::SeqCst), 2);
+    assert_eq!(HOOKED.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn test_without_a_hook_an_unknown_name_is_still_an_error() {
+    let app = one(Command::new("build"));
+    assert_eq!(
+        app.try_parse_from(["watch"]).unwrap_err().kind(),
+        ErrorKind::UnknownCommand
+    );
+}
+
+#[test]
+fn test_app_level_arguments_before_the_name_are_parsed_and_passed_on() {
+    let app = App::new("forge")
+        .arg(Arg::count("verbose").short('v').global(true))
+        .external(|ext| {
+            if ext.matches().count("verbose") == 2 {
+                Ok(())
+            } else {
+                Err("verbosity lost")
+            }
+        });
+    assert!(
+        app.try_run_from(["-vv", "plugin", "--own-flag"])
+            .unwrap()
+            .is_ok()
+    );
+}
+
+#[test]
+fn test_a_flag_is_never_handed_off() {
+    let app = App::new("forge")
+        .external(|_| {})
+        .command(Command::new("build"));
+    assert_eq!(
+        app.try_parse_from(["--bogus"]).unwrap_err().kind(),
+        ErrorKind::UnknownFlag
+    );
+}
+
+#[test]
+fn test_help_and_the_bare_invocation_keep_their_meaning() {
+    let app = App::new("forge")
+        .external(|_| {})
+        .command(Command::new("build"));
+    assert_eq!(
+        app.try_parse_from(["help"]).unwrap_err().kind(),
+        ErrorKind::HelpRequested
+    );
+    assert_eq!(
+        app.try_parse_from([] as [&str; 0]).unwrap_err().kind(),
+        ErrorKind::HelpRequested
+    );
+}
+
+#[test]
+fn test_parsing_records_the_external_without_dispatching_it() {
+    static HOOKED: AtomicUsize = AtomicUsize::new(0);
+    let app = App::new("forge").external(|_| {
+        let _ = HOOKED.fetch_add(1, Ordering::SeqCst);
+    });
+    let m = app.try_parse_from(["watch", "src"]).unwrap();
+    assert_eq!(m.external(), Some(("watch", &["src".to_owned()][..])));
+    assert_eq!(m.subcommand_name(), None);
+    assert_eq!(
+        HOOKED.load(Ordering::SeqCst),
+        0,
+        "parsing must not dispatch"
+    );
+
+    assert!(app.dispatch(&m).is_ok());
+    assert_eq!(HOOKED.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn test_a_typo_of_a_built_in_carries_a_suggestion() {
+    let app = App::new("forge")
+        .external(|ext| match ext.suggestion() {
+            Some(nearest) => Err(format!("did you mean '{nearest}'?")),
+            None => Ok(()),
+        })
+        .command(Command::new("build"))
+        .command(Command::new("secret").hidden(true));
+
+    let failure = app.try_run_from(["buidl"]).unwrap().unwrap_err();
+    assert_eq!(failure.message(), "did you mean 'build'?");
+    assert_eq!(failure.exit_code(), 1);
+    // Hidden commands are not suggested.
+    assert_eq!(app.suggest("secrt"), None);
+    assert!(app.try_run_from(["xyzzy"]).unwrap().is_ok());
+}
+
+// ---------------------------------------------------------------------------
 // Introspection
 // ---------------------------------------------------------------------------
 

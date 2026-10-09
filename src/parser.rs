@@ -49,6 +49,9 @@ pub(crate) struct Cli<'a> {
     /// Whether `prog help [command]` is accepted, and whether a bare invocation
     /// shows the help.
     pub(crate) help_command: bool,
+    /// Whether an unknown command name is handed to the external hook rather
+    /// than reported.
+    pub(crate) external: bool,
     /// The authorization hook, consulted when generating help so auth-gated
     /// commands appear only when authorized.
     #[cfg(feature = "auth")]
@@ -272,6 +275,14 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
             }
         }
 
+        // An unknown name goes to the external hook when there is one. Checked
+        // after the help command, so `prog help` keeps its meaning, and only for
+        // a bare name — a flag never reaches here.
+        if cli.external && !cli.commands.iter().any(|c| c.matches_name(token)) {
+            root.external = Some((token.clone(), tokens[i + 1..].to_vec()));
+            break;
+        }
+
         let command = resolve(cli, token)?;
         let sub = parse_command(
             cli,
@@ -299,7 +310,11 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
 
     if let Some((name, sub)) = command_parsed {
         root.subcommand = Some((name, Box::new(sub)));
-    } else if cli.help_command && !cli.commands.is_empty() && tokens.is_empty() {
+    } else if root.external.is_none()
+        && cli.help_command
+        && !cli.commands.is_empty()
+        && tokens.is_empty()
+    {
         // Nothing to do and nothing said: showing the help is more use than
         // exiting silently, which leaves the user none the wiser.
         return Err(ParseError::request(

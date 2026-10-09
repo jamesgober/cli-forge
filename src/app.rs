@@ -38,7 +38,8 @@ use std::process::ExitCode;
 
 use crate::arg::Arg;
 use crate::command::Command;
-use crate::error::{CommandError, ErrorKind, ParseError};
+use crate::error::{CommandError, ErrorKind, Outcome, ParseError, did_you_mean};
+use crate::external::External;
 use crate::matches::Matches;
 use crate::parser::{self, Cli};
 use crate::terminal::ColorChoice;
@@ -79,9 +80,13 @@ pub struct App {
     help_command: bool,
     theme: Option<Theme>,
     color: Option<ColorChoice>,
+    external: Option<ExternalHook>,
     #[cfg(feature = "auth")]
     auth_hook: Option<crate::auth::AuthHook>,
 }
+
+/// The hook that receives an external subcommand.
+type ExternalHook = Box<dyn Fn(&External<'_>) -> Result<(), CommandError>>;
 
 impl App {
     /// Create an application with the given program name.
@@ -110,6 +115,7 @@ impl App {
             help_command: true,
             theme: None,
             color: None,
+            external: None,
             #[cfg(feature = "auth")]
             auth_hook: None,
         }
@@ -361,6 +367,73 @@ impl App {
     pub fn color(mut self, choice: ColorChoice) -> App {
         self.color = Some(choice);
         self
+    }
+
+    /// Hand any command name the app does not define to `hook`, rather than
+    /// reporting it as unknown.
+    ///
+    /// The plugin mechanism `cargo` and `git` use: `forge watch` runs a separate
+    /// `forge-watch` program, found at run time, without the app knowing it
+    /// exists in advance. The hook receives the name, the untouched tokens after
+    /// it, and the app-level arguments parsed before it. It may return anything a
+    /// [`run`](Command::run) handler may, so a failure becomes the exit status.
+    ///
+    /// A misspelt built-in reaches the hook too, since the hook is the only
+    /// place that knows whether a matching program exists;
+    /// [`External::suggestion`] gives it the nearest registered command to fall
+    /// back on. See the [`External`] documentation for a complete hook.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let app = App::new("forge")
+    ///     .external(|ext| {
+    ///         // In a real program: spawn format!("forge-{}", ext.name()).
+    ///         if ext.name() == "watch" { Ok(()) } else { Err("no such command") }
+    ///     })
+    ///     .command(Command::new("build"));
+    ///
+    /// assert!(app.try_run_from(["watch", "src"]).unwrap().is_ok());
+    /// assert!(app.try_run_from(["nonexistent"]).unwrap().is_err());
+    /// // Registered commands are untouched.
+    /// assert!(app.try_run_from(["build"]).unwrap().is_ok());
+    /// ```
+    #[must_use]
+    pub fn external<F, R>(mut self, hook: F) -> App
+    where
+        F: Fn(&External<'_>) -> R + 'static,
+        R: Outcome,
+    {
+        self.external = Some(Box::new(move |ext| hook(ext).into_outcome()));
+        self
+    }
+
+    /// The registered command nearest to `name`, if one is close enough to
+    /// suggest.
+    ///
+    /// The same suggestion an unknown-command error carries, for a program that
+    /// reports such mistakes itself.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let app = App::new("forge").command(Command::new("build"));
+    /// assert_eq!(app.suggest("buidl"), Some("build"));
+    /// assert_eq!(app.suggest("xyzzy"), None);
+    /// ```
+    #[must_use]
+    pub fn suggest(&self, name: &str) -> Option<&str> {
+        did_you_mean(
+            name,
+            self.commands
+                .iter()
+                .filter(|c| !c.hidden)
+                .flat_map(Command::invocation_names),
+        )
     }
 
     /// Set the authorization hook that enforces
@@ -615,6 +688,14 @@ impl App {
     /// assert!(app.dispatch(&matches).is_ok());
     /// ```
     pub fn dispatch(&self, matches: &Matches) -> Result<(), CommandError> {
+        if let Some((name, args)) = matches.external() {
+            return match &self.external {
+                Some(hook) => hook(&External::new(name, args, matches, self.suggest(name))),
+                // Recorded only when a hook exists, so this is a `Matches` from a
+                // different app; there is nothing sensible to run.
+                None => Ok(()),
+            };
+        }
         let Some((name, sub)) = matches.subcommand() else {
             return Ok(());
         };
@@ -735,6 +816,7 @@ impl App {
             commands: &self.commands,
             globals: &self.globals,
             help_command: self.help_command,
+            external: self.external.is_some(),
             #[cfg(feature = "auth")]
             authorizer: self.auth_hook.as_ref(),
         }
@@ -787,6 +869,7 @@ impl std::fmt::Debug for App {
         s.field("commands", &self.commands);
         s.field("globals", &self.globals);
         s.field("help_command", &self.help_command);
+        s.field("has_external_hook", &self.external.is_some());
         #[cfg(feature = "auth")]
         s.field("has_auth_hook", &self.auth_hook.is_some());
         s.finish()
