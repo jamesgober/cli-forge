@@ -31,7 +31,7 @@
 
 ```toml
 [dependencies]
-cli-forge = "2.0"
+cli-forge = "2.1"
 ```
 
 That is it. The defaults give you colour, correct text widths, and help that

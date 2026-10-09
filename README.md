@@ -451,8 +451,8 @@ counting-allocator test (`tests/allocation.rs`), not asserted. Criterion means
 | `markup`, four styled runs | ~234 |
 | themed line | ~167 |
 | `text::width`, styled | ~59 |
-| command parse, rich invocation | ~2700 |
-| `out`, through a capture | ~41 |
+| command parse, rich invocation | ~2100–2500 |
+| `out`, through a capture | ~25–40 |
 
 Styling costs more than the plain path because it builds an owned `String` and
 encodes escape sequences — a cost paid only when colour is asked for. Reproduce
@@ -463,7 +463,7 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v2.0.0`. The public surface is guaranteed under Semantic Versioning: no
+`v2.1.0`. The public surface is guaranteed under Semantic Versioning: no
 breaking changes before `3.0`. See the SemVer promise in
 [`docs/API.md`](./docs/API.md#stability), the
 [migration table](./CHANGELOG.md#migrating-from-1x), and the

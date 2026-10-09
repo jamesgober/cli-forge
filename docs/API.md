@@ -362,7 +362,9 @@ Migrating from `1.x` is a handful of renames; see the
 
 ## Performance notes
 
-Criterion means, Windows x86_64, release:
+Criterion means, Windows x86_64, release. A range means the figure moved that
+much between runs of the same code on the same machine; treat anything inside it
+as the same number:
 
 | Operation | ns/op |
 |-----------|------:|
@@ -377,10 +379,10 @@ Criterion means, Windows x86_64, release:
 | the same with the lookup hoisted | ~149 |
 | `text::width`, styled | ~59 |
 | `text::strip`, plain (borrows) | ~12 |
-| `out`, through a capture | ~41 |
-| a themed line, through a capture | ~210 |
-| command parse, minimal invocation | ~971 |
-| command parse, rich invocation | ~2528 |
+| `out`, through a capture | ~25–40 |
+| a themed line, through a capture | ~160–210 |
+| command parse, minimal invocation | ~730–970 |
+| command parse, rich invocation | ~2100–2500 |
 | help render | ~3599 |
 
 The invariants behind those numbers:

@@ -116,8 +116,8 @@ type. `kind()` and `subject()` are unchanged, so code matching on them keeps
 working; error wording is outside the stability promise.
 
 While no capture is active, the output path checks one relaxed atomic and
-proceeds exactly as before. Through a capture, `out` costs ~41 ns per line and a
-themed line ~210 ns.
+proceeds exactly as before. Through a capture, `out` costs roughly 25–40 ns per
+line and a themed line roughly 160–210 ns, the spread being run-to-run variance.
 
 ### Fixed
 
@@ -128,14 +128,19 @@ parse. Two smaller happy-path allocations went with it: every flag formatted its
 own display form up front purely so a validation error could name it, and
 `bump_count` allocated the argument name once per repeat of `-vvv`.
 
-| Benchmark | 2.0.0 | 2.1.0 | |
-|---|---|---|---|
-| `parse_simple` | 1.34 µs | 1.22 µs | −8.9% |
-| `parse_rich` | 2.91 µs | 2.70 µs | −6.6% |
+Measured by counting heap allocations, which is deterministic, for an app with
+three global arguments and a three-level command:
 
-The remaining gap against 1.x is hash-map traffic rather than allocation. Parsing
-happens once per process, three orders of magnitude below process startup, so it
-is not worth the churn to close.
+| | 2.0.0 | 2.1.0 | |
+|---|---:|---:|---|
+| allocations per parse | 132 | 96 | −27% |
+
+Wall-clock parse time is within run-to-run noise of 2.0.0 — roughly ±15% on the
+measuring machine across alternating runs of both versions — partly because the
+benchmark app declares no global arguments, so it never exercised the copy that
+was removed, and partly because the new negation and group checks add a few
+lookups of their own. The saving shows up as allocations, not as a timing claim
+this release can honestly make.
 
 ### Testing
 

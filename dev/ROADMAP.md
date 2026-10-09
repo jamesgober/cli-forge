@@ -141,6 +141,34 @@ Exit criteria:
 
 ---
 
+## v2.1.0 — Testable output, the rest of the argument model (DONE)
+
+Strictly additive. Everything 2.0 deliberately left for a minor release, in one.
+
+Exit criteria:
+
+- [x] A program's printing can be asserted in an ordinary test, per thread,
+      without spawning the binary (`capture`, `Captured`). Uncaptured output
+      pays one relaxed atomic load and nothing else.
+- [x] Rules over a set of arguments, not just pairs (`ArgGroup`), with the
+      choice readable afterwards (`Matches::group`) and a required group shown in
+      the usage line.
+- [x] A flag can be turned off explicitly, and "off" is distinguishable from
+      "never mentioned" (`Arg::negatable`, `Matches::explicit_flag`).
+- [x] One occurrence can carry a list (`Arg::value_delimiter`), each piece
+      validated on its own.
+- [x] Plugins the way cargo has them (`App::external`, `External`), without
+      flags or registered commands ever being handed off.
+- [x] Long help pages get headings (`Command::category`, `Arg::category`).
+- [x] The per-level deep copy of global arguments introduced in 2.0 removed,
+      with criterion numbers (−9% / −7%).
+- [x] Relationship errors say what clashed in the user's spelling.
+- [x] `Arg::env` tested against real environment variables, which it never had
+      been.
+- [x] Nothing existing changes: no 2.0 program needs editing to upgrade.
+
+---
+
 ## Next
 
 The core is the base; the extensions are separate crates that drop onto these
@@ -149,7 +177,8 @@ seams. Nothing below belongs in this crate.
 - `cli-table` — tables and grids, measuring through `text::width`.
 - `cli-progress` — bars and spinners, styled through `Theme` and sized through
   `terminal::size`.
-- `cli-complete` — shell completions, generated from the read-only command tree.
+- `cli-complete` — shell completions, generated from the read-only command tree
+  (which since 2.1 includes groups, categories, delimiters, and negatable flags).
 - `cli-man` — manual pages, from the same tree.
 - `cli-prompt` — interactive input: confirm, select, password.
 - `cli-gradient` — gradient and multi-stop colour over `Color`.
