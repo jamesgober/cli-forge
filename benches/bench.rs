@@ -31,6 +31,43 @@ use criterion::{Criterion, criterion_group, criterion_main};
 /// A line of the length a real tool prints.
 const LINE: &str = "deploying release artifacts to the staging environment";
 
+/// What `out` itself costs, which the `plain_write` benchmark does not measure:
+/// it reproduces the formatting against a buffer rather than calling the real
+/// function.
+///
+/// Measured inside a capture, so the number is everything `out` does -- the
+/// capture check, the `Display` dispatch, the formatting -- minus the write
+/// syscall. That is the honest way to bound the cost of the capture check added
+/// in 2.1: the real path also locks standard output and flushes a `LineWriter`
+/// on the newline, which is microseconds, so one relaxed atomic load against it
+/// is not measurable.
+fn out_benches(c: &mut Criterion) {
+    // Batched inside one capture so the measurement is `out` itself rather than
+    // the capture's own setup. Divide by 64 for the per-line cost.
+    let _ = c.bench_function("out_x64_captured", |b| {
+        b.iter(|| {
+            let (_, log) = cli_forge::capture(|| {
+                for _ in 0..64 {
+                    cli_forge::out(black_box(LINE));
+                }
+            });
+            black_box(log);
+        });
+    });
+
+    // The same through a theme level, which adds glyph resolution and a render.
+    let _ = c.bench_function("ok_x64_captured", |b| {
+        b.iter(|| {
+            let (_, log) = cli_forge::capture(|| {
+                for _ in 0..64 {
+                    cli_forge::ok(black_box(LINE));
+                }
+            });
+            black_box(log);
+        });
+    });
+}
+
 fn output_benches(c: &mut Criterion) {
     // Force the depth so the render paths are actually exercised. Unlike the
     // previous approach of setting environment variables, this needs no `unsafe`
@@ -231,6 +268,7 @@ fn parse_benches(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    out_benches,
     output_benches,
     markup_benches,
     reuse_benches,

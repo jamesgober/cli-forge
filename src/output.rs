@@ -13,6 +13,10 @@
 //! failure that the caller could act on, and the usual cause is a closed pipe
 //! (`yourtool | head`), where aborting would turn an ordinary shell idiom into a
 //! crash. Where the result matters, [`write_to`] hands it back.
+//!
+//! Every path here first asks [`capture`](crate::capture) whether this thread is
+//! recording, which is how a program's printing becomes testable. While nothing
+//! in the process is capturing, that question is one relaxed atomic load.
 
 use std::fmt::Display;
 use std::io::Write;
@@ -35,6 +39,9 @@ use crate::terminal::Stream;
 /// out(format!("built {} targets", 3)); // any Display value
 /// ```
 pub fn out<T: Display>(value: T) {
+    if crate::capture::active() && crate::capture::record(Stream::Stdout, &value) {
+        return;
+    }
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     // A broken pipe or closed stream is unrecoverable from a print helper and
@@ -62,6 +69,9 @@ pub fn out<T: Display>(value: T) {
 /// err(style("ERROR:").red().bold().render_for(Stream::Stderr));
 /// ```
 pub fn err<T: Display>(value: T) {
+    if crate::capture::active() && crate::capture::record(Stream::Stderr, &value) {
+        return;
+    }
     let stderr = std::io::stderr();
     let mut handle = stderr.lock();
     // See `out`: a failed write from a print helper is intentionally ignored.
@@ -84,6 +94,9 @@ pub fn err<T: Display>(value: T) {
 /// }
 /// ```
 pub fn write_to<T: Display>(stream: Stream, value: T) -> std::io::Result<()> {
+    if crate::capture::active() && crate::capture::record(stream, &value) {
+        return Ok(());
+    }
     match stream {
         Stream::Stdout => {
             let stdout = std::io::stdout();

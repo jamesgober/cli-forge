@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.0.0</code> &mdash; the answer, without the explanation.
+  <code>v2.1.0</code> &mdash; the answer, without the explanation.
 </p>
 
 > Every recipe is complete and compiles. For *why* any of it works, see
@@ -48,6 +48,7 @@
 - [Add examples to a help page](#add-examples-to-a-help-page)
 - [Hide a debugging flag](#hide-a-debugging-flag)
 - [Test a command without running it](#test-a-command-without-running-it)
+- [Assert on what the program printed](#assert-on-what-the-program-printed)
 - [Make styled output deterministic in a test](#make-styled-output-deterministic-in-a-test)
 - [Generate something from the command tree](#generate-something-from-the-command-tree)
 
@@ -700,6 +701,35 @@ fn main() {
 ```
 
 To run the handler, use `try_run_from` and assert on the outcome.
+
+---
+
+## Assert on what the program printed
+
+```rust
+use cli_forge::{capture, ok, out, warn, Stream, Theme};
+
+fn main() {
+    // #[test] fn reports_on_the_right_streams()
+    Theme::new().install();
+
+    let (_, log) = capture(|| {
+        out("building...");
+        warn("2 tests skipped");
+        ok("done");
+    });
+
+    assert_eq!(log.lines(Stream::Stdout), ["building...", "✓ done"]);
+    assert_eq!(log.lines(Stream::Stderr), ["! 2 tests skipped"]);
+    assert_eq!(log.combined(), "building...
+! 2 tests skipped
+✓ done
+");
+}
+```
+
+Per-thread, so it is safe in parallel tests. It sees what went through this
+crate, not `println!` or a child process.
 
 ---
 

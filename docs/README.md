@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.0.0</code> &mdash; the documentation index.
+  <code>v2.1.0</code> &mdash; the documentation index.
 </p>
 
 <div align="center">
@@ -65,6 +65,7 @@ If you only read one thing, read the [Guide](./GUIDE.md).
 - [Return a failure, and an exit code](./COMMANDS.md#failing-well)
 - [Customise the help page](./COMMANDS.md#help)
 - [Test a CLI](./COMMANDS.md#testing) &middot; [Recipe](./RECIPES.md#test-a-command-without-running-it)
+- [Assert on what the program printed](./COMMANDS.md#testing-what-the-program-prints) &middot; [Recipe](./RECIPES.md#assert-on-what-the-program-printed)
 
 <br>
 

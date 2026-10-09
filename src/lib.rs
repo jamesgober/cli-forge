@@ -190,6 +190,8 @@ mod arg;
 #[cfg(feature = "auth")]
 mod auth;
 #[cfg(feature = "std")]
+mod capture;
+#[cfg(feature = "std")]
 mod command;
 #[cfg(feature = "std")]
 mod error;
@@ -244,6 +246,8 @@ pub use crate::app::App;
 pub use crate::arg::Arg;
 #[cfg(feature = "auth")]
 pub use crate::auth::AuthRequest;
+#[cfg(feature = "std")]
+pub use crate::capture::{Captured, capture};
 #[cfg(feature = "std")]
 pub use crate::command::Command;
 #[cfg(feature = "std")]

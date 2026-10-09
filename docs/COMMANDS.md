@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.0.0</code> &mdash; defining commands, parsing input, validating values, reporting failure.
+  <code>v2.1.0</code> &mdash; defining commands, parsing input, validating values, reporting failure.
 </p>
 
 > If you have not read the [Guide](./GUIDE.md), start there. For a specific
@@ -1118,6 +1118,52 @@ fn main() {
 `terminal::set_color_choice(ColorChoice::Never)` also works, but it is
 process-wide: tests run in parallel by default, so one test turning colour off
 affects the others. Prefer the explicit-depth form.
+
+### Testing what the program prints
+
+The hard part of testing a CLI is normally its *output*, because it goes to a
+file descriptor — so the usual answer is to spawn the binary and read its pipes.
+`capture` makes it an ordinary assertion instead:
+
+```rust
+use cli_forge::{capture, ok, out, warn, App, Command, Theme};
+
+fn main() {
+    // #[test] fn build_reports_what_it_did()
+    Theme::new().install();
+
+    let mut app = App::new("forge");
+    app.register(Command::new("build").run(|_| {
+        out("building...");
+        warn("this build is not optimised");
+        ok("compiled 3 targets");
+    }));
+
+    let (outcome, log) = capture(|| app.try_run_from(["build"]));
+
+    assert!(outcome.unwrap().is_ok());
+    assert_eq!(log.lines(cli_forge::Stream::Stdout), ["building...", "✓ compiled 3 targets"]);
+    assert!(log.err().contains("not optimised"));
+}
+```
+
+Notice what that asserts without arranging anything: the warning went to standard
+error and the success did not. That is the stream discipline a theme owns, and
+nothing other than a capture can observe it.
+
+`Captured` gives you `out()`, `err()`, `combined()` (both streams in the order
+the lines were written), `lines(stream)` (without the trailing newlines, which
+makes a failure far more readable), and `is_empty()`.
+
+Two things to know:
+
+- **It is per-thread**, so tests that capture run in parallel with tests that
+  print, and a thread spawned inside the closure is not captured.
+- **It sees only what went through this crate.** Not `println!`, not a direct
+  write to `std::io::stdout`, and not a child process. And only the entry points
+  that print at all print: `try_run_from` and `try_parse_from` hand failures back
+  rather than reporting them, so a capture around one of those sees handler output
+  and nothing else.
 
 ---
 

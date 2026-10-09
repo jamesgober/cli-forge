@@ -21,6 +21,74 @@
 
 ---
 
+## [2.1.0] - 2026-10-09
+
+Strictly additive. One new capability, and one performance fix.
+
+### Added
+
+**Output capture, so a program's printing can be tested.** Testing what a CLI
+prints normally means spawning the binary and reading its pipes, which is slow,
+awkward, and blind to anything a library printed on the program's behalf.
+`capture` redirects this crate's output paths into a buffer for the duration of a
+closure instead:
+
+```rust
+let (outcome, log) = capture(|| app.try_run_from(["build"]));
+
+assert_eq!(log.lines(Stream::Stdout), ["building...", "✓ compiled 3 targets"]);
+assert!(log.err().contains("not optimised"));
+```
+
+That asserts the stream discipline a `Theme` is responsible for — the warning went
+to standard error and the success did not — which nothing else can observe.
+
+- `capture(body) -> (T, Captured)`, returning whatever the body returned.
+- `Captured::{out, err, combined, lines, is_empty}`. `combined` interleaves both
+  streams in the order the lines were written; `lines` drops the trailing
+  newlines, which makes a failing assertion far more readable.
+- Per-thread, so tests that capture run in parallel with tests that print.
+  Nesting works: the inner capture takes over and the outer resumes.
+  Panic-safe: a panic inside the closure leaves the thread un-redirected.
+- Captures `out`, `err`, `write_to`, the themed printers, and the reports
+  `App::run` / `App::parse` print. Not `println!`, not a direct
+  `std::io::stdout` write, and not a child process.
+
+### Changed
+
+While no capture is active anywhere in the process, the output path checks one
+relaxed atomic and proceeds exactly as before. Measured through a capture, `out`
+costs ~41 ns per line and a themed line ~210 ns; the real path locks standard
+output and flushes a `LineWriter` on the newline, so the added load is not
+measurable against it.
+
+### Fixed
+
+**`Cli::inherited` deep-copied every global argument on every command level.**
+`parse_command` recurses, so a three-level invocation paid for three full copies
+of every argument marked `global`, each carrying six strings and three vectors.
+It now borrows, and the set is built once per parse.
+
+Two smaller allocations on the happy path went with it: every long and short flag
+formatted its own display form (`"--jobs"`) up front purely so a validation error
+could name it, and `bump_count` reached straight for `entry` — which needs an
+owned key — so `-vvv` allocated the argument name once per repeat.
+
+| Benchmark | 2.0.0 | 2.1.0 | |
+|---|---|---|---|
+| `parse_simple` | 1.34 µs | 1.22 µs | −8.9% |
+| `parse_rich` | 2.91 µs | 2.70 µs | −6.6% |
+
+The remaining gap against 1.x is hash-map traffic rather than allocation: roughly
+34 short-string hashes per parse, because `finalize` and the relationship check
+probe both the command's own slot and the global one for every declared
+argument. Closing it would mean ordered vectors and linear search, which is
+faster at the sizes a command actually has — but parsing happens once per
+process, three orders of magnitude below process startup, so it is not worth the
+churn.
+
+---
+
 ## [2.0.0] - 2026-10-08
 
 The output layer becomes **themed and reusable**, the command layer gains the

@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.0.0</code> &mdash; colours, themes, markers, columns, markup, and measuring text.
+  <code>v2.1.0</code> &mdash; colours, themes, markers, columns, markup, and measuring text.
 </p>
 
 > **This is the long one.** If you want a specific answer rather than an

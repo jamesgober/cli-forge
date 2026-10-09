@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.0.0</code> &mdash; the public surface and the SemVer promise.
+  <code>v2.1.0</code> &mdash; the public surface and the SemVer promise.
 </p>
 
 > **Signatures and examples live in the rustdoc**, at
@@ -64,10 +64,18 @@ core stays small and everything speaks one system.
 | `out(value)` | Print any `Display` to standard output, with a newline. Allocation-free for a `&str`. |
 | `err(value)` | The same, to standard error. |
 | `write_to(stream, value)` | The accountable form: reports whether the write succeeded. |
+| `capture(body)` | Record everything printed while `body` runs, so printing can be tested. |
+| `Captured` | `out`, `err`, `combined`, `lines(stream)`, `is_empty`. |
 
 `out` and `err` never parse markup and never allocate for styling. A failed write
 is ignored, because the usual cause is a closed pipe (`yourtool | head`) and a
 print helper has no way to report failure that the caller could act on.
+
+`capture` is per-thread, so tests that capture run in parallel with tests that
+print. While nothing in the process is capturing, the output path checks one
+relaxed atomic and proceeds exactly as before. It sees only what went through
+this crate — not `println!`, not a direct `std::io::stdout` write, and not a
+child process.
 
 ### Styling
 
@@ -340,6 +348,8 @@ Criterion means, Windows x86_64, release:
 | the same with the lookup hoisted | ~149 |
 | `text::width`, styled | ~59 |
 | `text::strip`, plain (borrows) | ~12 |
+| `out`, through a capture | ~41 |
+| a themed line, through a capture | ~210 |
 | command parse, minimal invocation | ~971 |
 | command parse, rich invocation | ~2528 |
 | help render | ~3599 |

@@ -35,7 +35,7 @@
 
 ## What's here
 
-`v2.0.0`. Two things set cli-forge apart from the alternatives: **output is
+`v2.1.0`. Two things set cli-forge apart from the alternatives: **output is
 themed and reusable** rather than restyled at every call site, and the **styling
 layer is a seam** sibling crates build on, so everything a program prints speaks
 one system.
@@ -50,6 +50,8 @@ one system.
   hyperlink. Describe a marker once, apply it to anything with `paint`.
 - **Plain output** — `out` / `err`: one call, no parsing, no allocation for a
   string literal, ~9.5 ns. The hot path stays cheap.
+- **Testable output** — `capture` records what a program printed, per thread, so
+  asserting on it is an ordinary test rather than a subprocess and a pipe.
 - **Four styling paths** — the `style` builder, inline `markup`, a named
   `define` / `named` registry, and theme levels. All render to **identical
   bytes** for the same intent, which is what makes mixing them safe.
@@ -95,7 +97,7 @@ Migrating from `1.x` is a handful of renames; see the
 
 ```toml
 [dependencies]
-cli-forge = "2.0"
+cli-forge = "2.1"
 ```
 
 The defaults are `std`, `color`, `unicode`, and `termsize`. For a build with no
@@ -104,7 +106,7 @@ approximate, and help wraps to `COLUMNS` or 80):
 
 ```toml
 [dependencies]
-cli-forge = { version = "2.0", default-features = false, features = ["std", "color"] }
+cli-forge = { version = "2.1", default-features = false, features = ["std", "color"] }
 ```
 
 <br>
@@ -446,7 +448,8 @@ counting-allocator test (`tests/allocation.rs`), not asserted. Criterion means
 | `markup`, four styled runs | ~234 |
 | themed line | ~167 |
 | `text::width`, styled | ~59 |
-| command parse, rich invocation | ~2500 |
+| command parse, rich invocation | ~2700 |
+| `out`, through a capture | ~41 |
 
 Styling costs more than the plain path because it builds an owned `String` and
 encodes escape sequences — a cost paid only when colour is asked for. Reproduce
