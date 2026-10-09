@@ -803,8 +803,98 @@ fn finalize(
     }
 
     check_relationships(declared, sink)?;
-    let _ = command;
+    check_groups(command, declared, sink, subcommand_invoked)?;
     Ok(())
+}
+
+/// Enforce each of `command`'s argument groups, and record which member
+/// answered each one.
+///
+/// "Given" for the at-most-one rule means supplied by the user and not turned
+/// off; a default does not count, or a group whose members have defaults could
+/// never be satisfied without a conflict. For the at-least-one rule any value
+/// counts, defaults included, because a default is an answer.
+fn check_groups(
+    command: &Command,
+    declared: &[&Arg],
+    sink: &mut Sink,
+    subcommand_invoked: bool,
+) -> Result<(), ParseError> {
+    for group in &command.groups {
+        let given: Vec<&str> = group
+            .members
+            .iter()
+            .map(String::as_str)
+            .filter(|name| {
+                matches!(
+                    sink.source(name),
+                    Some(ValueSource::CommandLine | ValueSource::Environment)
+                ) && !sink.negated(name)
+            })
+            .collect();
+
+        if !group.multiple && given.len() > 1 {
+            return Err(
+                ParseError::new(ErrorKind::Conflict, display_member(declared, given[0]))
+                    .with_detail(crate::shim::format!(
+                        "'{}' and '{}' cannot be used together; '{}' accepts only one of: {}",
+                        display_member(declared, given[0]),
+                        display_member(declared, given[1]),
+                        group.name,
+                        members_list(declared, group),
+                    )),
+            );
+        }
+
+        let answered = given.first().copied().or_else(|| {
+            group
+                .members
+                .iter()
+                .map(String::as_str)
+                .find(|name| sink.present(name))
+        });
+
+        match answered {
+            Some(member) => {
+                let _ = sink
+                    .level
+                    .groups
+                    .insert(group.name.clone(), member.to_owned());
+            }
+            // As with a required argument, a grouping command whose subcommand
+            // took over cannot have been expected to answer its own group.
+            None if group.required && !subcommand_invoked => {
+                return Err(
+                    ParseError::new(ErrorKind::MissingRequired, &group.name).with_detail(
+                        crate::shim::format!("provide one of: {}", members_list(declared, group)),
+                    ),
+                );
+            }
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+/// How to name a group member in an error: its flag form if it has one.
+fn display_member(declared: &[&Arg], name: &str) -> String {
+    match declared.iter().find(|arg| arg.name == name) {
+        Some(arg) => match arg.long_name() {
+            Some(long) => crate::shim::format!("--{long}"),
+            None => arg.name.clone(),
+        },
+        None => name.to_owned(),
+    }
+}
+
+/// Every member of `group`, named for an error.
+fn members_list(declared: &[&Arg], group: &crate::group::ArgGroup) -> String {
+    group
+        .members
+        .iter()
+        .map(|name| display_member(declared, name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The value of an argument's environment variable, if it has one and it is set.

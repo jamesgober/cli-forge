@@ -423,6 +423,180 @@ fn test_help_shows_both_spellings_in_one_entry() {
     assert!(help.contains("--[no-]cache"), "{help}");
 }
 
+fn formats(group: crate::ArgGroup) -> App {
+    one(Command::new("dump")
+        .args([Arg::flag("json"), Arg::flag("yaml"), Arg::flag("toml")])
+        .group(group))
+}
+
+#[test]
+fn test_an_exactly_one_group() {
+    let app = formats(
+        crate::ArgGroup::new("format")
+            .args(["json", "yaml", "toml"])
+            .required(true),
+    );
+
+    let none = app.try_parse_from(["dump"]).unwrap_err();
+    assert_eq!(none.kind(), ErrorKind::MissingRequired);
+    assert_eq!(none.subject(), "format");
+    assert!(none.detail().unwrap().contains("--json, --yaml, --toml"));
+
+    let two = app
+        .try_parse_from(["dump", "--json", "--toml"])
+        .unwrap_err();
+    assert_eq!(two.kind(), ErrorKind::Conflict);
+    let detail = two.detail().unwrap();
+    assert!(detail.contains("'--json' and '--toml'"), "{detail}");
+    assert!(detail.contains("'format'"), "{detail}");
+
+    let m = app.try_parse_from(["dump", "--yaml"]).unwrap();
+    assert_eq!(m.leaf().group("format"), Some("yaml"));
+}
+
+#[test]
+fn test_an_at_most_one_group_is_the_default() {
+    let app = formats(crate::ArgGroup::new("format").args(["json", "yaml", "toml"]));
+    let m = app.try_parse_from(["dump"]).unwrap();
+    assert_eq!(m.leaf().group("format"), None);
+    assert!(app.try_parse_from(["dump", "--json", "--yaml"]).is_err());
+}
+
+#[test]
+fn test_an_at_least_one_group() {
+    let app = formats(
+        crate::ArgGroup::new("format")
+            .args(["json", "yaml", "toml"])
+            .required(true)
+            .multiple(true),
+    );
+    assert!(app.try_parse_from(["dump"]).is_err());
+    let m = app.try_parse_from(["dump", "--toml", "--json"]).unwrap();
+    // The first member listed in the group, as the documentation says.
+    assert!(matches!(m.leaf().group("format"), Some("json" | "toml")));
+}
+
+#[test]
+fn test_a_default_answers_a_group_but_never_conflicts() {
+    let app = one(Command::new("serve")
+        .arg(Arg::option("port").default("8080"))
+        .arg(Arg::option("socket"))
+        .group(
+            crate::ArgGroup::new("listen")
+                .args(["port", "socket"])
+                .required(true),
+        ));
+
+    // The default answers the required group.
+    let m = app.try_parse_from(["serve"]).unwrap();
+    assert_eq!(m.leaf().group("listen"), Some("port"));
+
+    // And does not count against the user's own choice.
+    let m = app.try_parse_from(["serve", "--socket", "/tmp/s"]).unwrap();
+    assert_eq!(m.leaf().group("listen"), Some("socket"));
+
+    // Only two things the user actually supplied conflict.
+    assert!(
+        app.try_parse_from(["serve", "--socket", "s", "--port", "1"])
+            .is_err()
+    );
+}
+
+#[test]
+fn test_an_explicit_off_is_not_a_group_answer() {
+    let app = one(Command::new("dump")
+        .arg(Arg::flag("json").negatable(true))
+        .arg(Arg::flag("yaml"))
+        .group(
+            crate::ArgGroup::new("format")
+                .args(["json", "yaml"])
+                .required(true),
+        ));
+    assert!(app.try_parse_from(["dump", "--no-json"]).is_err());
+    assert!(app.try_parse_from(["dump", "--no-json", "--yaml"]).is_ok());
+}
+
+#[test]
+fn test_a_positional_can_be_a_group_member() {
+    let app = one(Command::new("read")
+        .arg(Arg::positional("file"))
+        .arg(Arg::flag("stdin"))
+        .group(
+            crate::ArgGroup::new("input")
+                .args(["file", "stdin"])
+                .required(true),
+        ));
+    assert_eq!(
+        app.try_parse_from(["read", "a.txt"])
+            .unwrap()
+            .leaf()
+            .group("input"),
+        Some("file")
+    );
+    assert_eq!(
+        app.try_parse_from(["read", "--stdin"])
+            .unwrap()
+            .leaf()
+            .group("input"),
+        Some("stdin")
+    );
+    let both = app
+        .try_parse_from(["read", "a.txt", "--stdin"])
+        .unwrap_err();
+    assert!(
+        both.detail().unwrap().contains("'file' and '--stdin'"),
+        "{:?}",
+        both.detail()
+    );
+}
+
+#[test]
+fn test_a_parents_required_group_is_not_demanded_once_a_subcommand_runs() {
+    let app = one(Command::new("remote")
+        .args([Arg::flag("all"), Arg::flag("mine")])
+        .group(
+            crate::ArgGroup::new("scope")
+                .args(["all", "mine"])
+                .required(true),
+        )
+        .subcommand(Command::new("list")));
+    assert!(app.try_parse_from(["remote", "list"]).is_ok());
+    assert!(app.try_parse_from(["remote"]).is_err());
+}
+
+#[test]
+fn test_a_required_group_appears_in_the_usage_line() {
+    let app = formats(
+        crate::ArgGroup::new("format")
+            .args(["json", "yaml", "toml"])
+            .required(true),
+    );
+    let help = plain(&app.command_help(["dump"]).unwrap());
+    assert!(
+        help.contains("USAGE: demo dump [options] <--json|--yaml|--toml>"),
+        "{help}"
+    );
+
+    // An optional group stays under [options].
+    let optional = formats(crate::ArgGroup::new("format").args(["json", "yaml", "toml"]));
+    let help = plain(&optional.command_help(["dump"]).unwrap());
+    assert!(!help.contains("<--json"), "{help}");
+}
+
+#[test]
+fn test_groups_are_readable_from_outside() {
+    let cmd = Command::new("dump").group(
+        crate::ArgGroup::new("format")
+            .args(["json", "yaml"])
+            .required(true),
+    );
+    let group = &cmd.groups()[0];
+    assert_eq!(group.name(), "format");
+    assert_eq!(group.members(), ["json", "yaml"]);
+    assert!(group.is_required());
+    assert!(!group.is_multiple());
+}
+
 #[test]
 fn test_a_single_valued_option_is_last_wins() {
     let app = one(Command::new("build").arg(Arg::option("jobs")));

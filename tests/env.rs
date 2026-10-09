@@ -127,6 +127,36 @@ fn environment_fallbacks_behave_as_documented() {
     );
     unset("CLI_FORGE_TEST_LEVEL");
 
+    // A member supplied through its variable answers a group, and counts as
+    // given for the at-most-one rule.
+    let grouped = App::new("forge").command(
+        Command::new("dump")
+            .arg(Arg::flag("json").env("CLI_FORGE_TEST_JSON"))
+            .arg(Arg::flag("yaml"))
+            .group(
+                cli_forge::ArgGroup::new("format")
+                    .args(["json", "yaml"])
+                    .required(true),
+            ),
+    );
+    set("CLI_FORGE_TEST_JSON", "1");
+    assert_eq!(
+        grouped
+            .try_parse_from(["dump"])
+            .unwrap()
+            .leaf()
+            .group("format"),
+        Some("json")
+    );
+    assert_eq!(
+        grouped
+            .try_parse_from(["dump", "--yaml"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Conflict
+    );
+    unset("CLI_FORGE_TEST_JSON");
+
     // With everything unset again, nothing is left over.
     let m = app.try_parse_from(["push"]).unwrap();
     assert_eq!(m.leaf().value("token"), None);

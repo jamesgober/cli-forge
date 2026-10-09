@@ -242,6 +242,28 @@ pub(crate) fn usage_command(cli: &Cli, path: &[&str], command: &Command) -> Stri
         line.push(' ');
         line.push_str(&positional_slot(arg));
     }
+    // A required group is a choice the user must make, so it belongs in the
+    // usage line rather than being discovered from an error.
+    for group in command.groups.iter().filter(|g| g.required) {
+        let choices: Vec<String> = group
+            .members
+            .iter()
+            .map(|name| {
+                command
+                    .args
+                    .iter()
+                    .find(|arg| &arg.name == name)
+                    .and_then(Arg::long_name)
+                    .map_or_else(|| name.clone(), |long| crate::shim::format!("--{long}"))
+            })
+            .collect();
+        line.push_str(" <");
+        line.push_str(&choices.join("|"));
+        line.push('>');
+        if group.multiple {
+            line.push_str("...");
+        }
+    }
     if !command.subcommands.is_empty() {
         line.push_str(if command.subcommand_required {
             " <command>"

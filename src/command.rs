@@ -32,6 +32,7 @@ use core::fmt;
 
 use crate::arg::{Arg, ArgKind};
 use crate::error::{CommandError, Outcome};
+use crate::group::ArgGroup;
 use crate::matches::Matches;
 
 /// A handler invoked when its command is the one the user selected.
@@ -65,6 +66,7 @@ pub struct Command {
     pub(crate) after_help: Option<String>,
     pub(crate) usage: Option<String>,
     pub(crate) args: Vec<Arg>,
+    pub(crate) groups: Vec<ArgGroup>,
     pub(crate) subcommands: Vec<Command>,
     pub(crate) hidden: bool,
     pub(crate) requires_auth: bool,
@@ -94,6 +96,7 @@ impl Command {
             after_help: None,
             usage: None,
             args: Vec::new(),
+            groups: Vec::new(),
             subcommands: Vec::new(),
             hidden: false,
             requires_auth: false,
@@ -284,6 +287,32 @@ impl Command {
         I: IntoIterator<Item = Arg>,
     {
         self.args.extend(args);
+        self
+    }
+
+    /// Add a constraint over a set of this command's arguments.
+    ///
+    /// For the rules that are about a set rather than a pair — "exactly one
+    /// output format", "at least one source". See [`ArgGroup`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, ArgGroup, Command};
+    ///
+    /// let mut app = App::new("export");
+    /// app.register(
+    ///     Command::new("dump")
+    ///         .args([Arg::flag("json"), Arg::flag("yaml")])
+    ///         .group(ArgGroup::new("format").args(["json", "yaml"]).required(true)),
+    /// );
+    ///
+    /// let m = app.try_parse_from(["dump", "--json"]).unwrap();
+    /// assert_eq!(m.leaf().group("format"), Some("json"));
+    /// ```
+    #[must_use]
+    pub fn group(mut self, group: ArgGroup) -> Command {
+        self.groups.push(group);
         self
     }
 
@@ -546,6 +575,20 @@ impl Command {
         &self.args
     }
 
+    /// The argument groups this command declares.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{ArgGroup, Command};
+    /// let cmd = Command::new("dump").group(ArgGroup::new("format"));
+    /// assert_eq!(cmd.groups()[0].name(), "format");
+    /// ```
+    #[must_use]
+    pub fn groups(&self) -> &[ArgGroup] {
+        &self.groups
+    }
+
     /// This command's direct subcommands, in declaration order.
     ///
     /// # Examples
@@ -646,6 +689,7 @@ impl fmt::Debug for Command {
         let _ = s.field("aliases", &self.aliases);
         let _ = s.field("about", &self.about);
         let _ = s.field("args", &self.args);
+        let _ = s.field("groups", &self.groups);
         let _ = s.field("subcommands", &self.subcommands);
         let _ = s.field("hidden", &self.hidden);
         let _ = s.field("requires_auth", &self.requires_auth);

@@ -196,6 +196,8 @@ mod command;
 #[cfg(feature = "std")]
 mod error;
 #[cfg(feature = "std")]
+mod group;
+#[cfg(feature = "std")]
 mod help;
 #[cfg(feature = "std")]
 mod matches;
@@ -252,6 +254,8 @@ pub use crate::capture::{Captured, capture};
 pub use crate::command::Command;
 #[cfg(feature = "std")]
 pub use crate::error::{CommandError, ErrorKind, Outcome, ParseError};
+#[cfg(feature = "std")]
+pub use crate::group::ArgGroup;
 #[cfg(feature = "std")]
 pub use crate::matches::{Matches, ValueSource};
 #[cfg(feature = "std")]

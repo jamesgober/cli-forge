@@ -84,6 +84,8 @@ pub struct Matches {
     pub(crate) counts: HashMap<String, usize>,
     pub(crate) values: HashMap<String, Vec<String>>,
     pub(crate) sources: HashMap<String, ValueSource>,
+    /// For each argument group, the member that answered it.
+    pub(crate) groups: HashMap<String, String>,
     pub(crate) subcommand: Option<(String, Box<Matches>)>,
 }
 
@@ -366,6 +368,40 @@ impl Matches {
         self.values(name)
             .filter_map(|raw| raw.parse().ok())
             .collect()
+    }
+
+    /// Which member of the [argument group](crate::ArgGroup) `name` was given.
+    ///
+    /// The member the user supplied, if they supplied one; otherwise the first
+    /// member that has a value at all, which is how a default answers a required
+    /// group. `None` when no member has a value, or for an unknown group.
+    ///
+    /// For a [`multiple`](crate::ArgGroup::multiple) group this is the first
+    /// member given; read the rest by name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, ArgGroup, Command};
+    ///
+    /// let mut app = App::new("export");
+    /// app.register(
+    ///     Command::new("dump")
+    ///         .args([Arg::flag("json"), Arg::flag("yaml"), Arg::flag("toml")])
+    ///         .group(ArgGroup::new("format").args(["json", "yaml", "toml"]).required(true)),
+    /// );
+    ///
+    /// let m = app.try_parse_from(["dump", "--toml"]).unwrap();
+    /// let extension = match m.leaf().group("format") {
+    ///     Some("json") => "json",
+    ///     Some("yaml") => "yml",
+    ///     _ => "toml",
+    /// };
+    /// assert_eq!(extension, "toml");
+    /// ```
+    #[must_use]
+    pub fn group(&self, name: &str) -> Option<&str> {
+        self.groups.get(name).map(String::as_str)
     }
 
     /// The invoked subcommand's name and its own [`Matches`], if one was given.
