@@ -86,11 +86,26 @@ pub(crate) fn render_app(cli: &Cli) -> String {
     out.push_str(&usage_app(cli)[7..]);
     out.push('\n');
 
-    if !commands.is_empty() {
+    let (plain_commands, command_sections) = sections(&commands, |c| c.category.as_deref());
+    if !plain_commands.is_empty() {
         out.push('\n');
         out.push_str(&heading("COMMANDS:"));
         out.push('\n');
-        for command in &commands {
+        for command in &plain_commands {
+            push_row(
+                &mut out,
+                &invocation(command),
+                about(command),
+                column,
+                width,
+            );
+        }
+    }
+    for (name, list) in &command_sections {
+        out.push('\n');
+        out.push_str(&section_heading(name));
+        out.push('\n');
+        for command in list {
             push_row(
                 &mut out,
                 &invocation(command),
@@ -101,10 +116,11 @@ pub(crate) fn render_app(cli: &Cli) -> String {
         }
     }
 
+    let (plain_options, option_sections) = sections(&options, |a| a.category.as_deref());
     out.push('\n');
     out.push_str(&heading("OPTIONS:"));
     out.push('\n');
-    for arg in &options {
+    for arg in &plain_options {
         push_row(
             &mut out,
             &option_signature(arg),
@@ -117,6 +133,7 @@ pub(crate) fn render_app(cli: &Cli) -> String {
     if cli.version.is_some() {
         push_row(&mut out, "-V, --version", "show the version", column, width);
     }
+    push_option_sections(&mut out, &option_sections, column, width);
 
     push_footer(&mut out, cli);
     out
@@ -175,10 +192,12 @@ pub(crate) fn render_command(cli: &Cli, path: &[&str], command: &Command) -> Str
         }
     }
 
+    let all_options: Vec<&Arg> = flags.iter().chain(&inherited).copied().collect();
+    let (plain_options, option_sections) = sections(&all_options, |a| a.category.as_deref());
     out.push('\n');
     out.push_str(&heading("OPTIONS:"));
     out.push('\n');
-    for arg in flags.iter().chain(&inherited) {
+    for arg in &plain_options {
         push_row(
             &mut out,
             &option_signature(arg),
@@ -188,12 +207,22 @@ pub(crate) fn render_command(cli: &Cli, path: &[&str], command: &Command) -> Str
         );
     }
     push_row(&mut out, "-h, --help", "show this help", column, width);
+    push_option_sections(&mut out, &option_sections, column, width);
 
-    if !subcommands.is_empty() {
+    let (plain_subs, sub_sections) = sections(&subcommands, |c| c.category.as_deref());
+    if !plain_subs.is_empty() {
         out.push('\n');
         out.push_str(&heading("COMMANDS:"));
         out.push('\n');
-        for sub in &subcommands {
+        for sub in &plain_subs {
+            push_row(&mut out, &invocation(sub), about(sub), column, width);
+        }
+    }
+    for (name, list) in &sub_sections {
+        out.push('\n');
+        out.push_str(&section_heading(name));
+        out.push('\n');
+        for sub in list {
             push_row(&mut out, &invocation(sub), about(sub), column, width);
         }
     }
@@ -274,6 +303,34 @@ pub(crate) fn usage_command(cli: &Cli, path: &[&str], command: &Command) -> Stri
     line
 }
 
+/// Split `items` into the uncategorised ones and the named sections, keeping
+/// each section in the order its first item appears.
+///
+/// Order of appearance rather than alphabetical, so the program decides what
+/// comes first — through declaration order, or `display_order` for commands.
+fn sections<'a, T>(
+    items: &[&'a T],
+    category: impl Fn(&'a T) -> Option<&'a str>,
+) -> (Vec<&'a T>, Vec<(&'a str, Vec<&'a T>)>) {
+    let mut plain = Vec::new();
+    let mut named: Vec<(&'a str, Vec<&'a T>)> = Vec::new();
+    for &item in items {
+        match category(item) {
+            None => plain.push(item),
+            Some(name) => match named.iter_mut().find(|(existing, _)| *existing == name) {
+                Some((_, list)) => list.push(item),
+                None => named.push((name, vec![item])),
+            },
+        }
+    }
+    (plain, named)
+}
+
+/// The heading for a named section, in the same shape as the built-in ones.
+fn section_heading(name: &str) -> String {
+    heading(&crate::shim::format!("{}:", name.to_uppercase()))
+}
+
 /// The commands to show in a listing: never hidden ones, and — with the `auth`
 /// feature — auth-gated ones only when the hook authorizes them.
 ///
@@ -316,6 +373,29 @@ fn is_visible(command: &Command, cli: &Cli, parent_path: &[&str]) -> bool {
     path.push(command.name.as_str());
     let request = crate::auth::AuthRequest::new(&path);
     cli.authorizer.is_some_and(|hook| hook(&request))
+}
+
+/// Write each named option section after the default one.
+fn push_option_sections(
+    out: &mut String,
+    named: &[(&str, Vec<&Arg>)],
+    column: usize,
+    width: usize,
+) {
+    for (name, list) in named {
+        out.push('\n');
+        out.push_str(&section_heading(name));
+        out.push('\n');
+        for arg in list {
+            push_row(
+                out,
+                &option_signature(arg),
+                &arg_description(arg),
+                column,
+                width,
+            );
+        }
+    }
 }
 
 fn push_header(out: &mut String, cli: &Cli) {

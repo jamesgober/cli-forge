@@ -1123,6 +1123,114 @@ fn test_registration_order_is_kept_without_an_explicit_order() {
 }
 
 #[test]
+fn test_categorised_commands_get_their_own_sections() {
+    let mut app = App::new("forge");
+    app.register(Command::new("build").about("compile"));
+    app.register(Command::new("publish").category("Release").about("upload"));
+    app.register(Command::new("test").about("run tests"));
+    app.register(Command::new("yank").category("Release").about("withdraw"));
+    app.register(Command::new("login").category("Account").about("sign in"));
+
+    let help = plain(&app.help());
+    let at = |needle: &str| {
+        help.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing:\n{help}"))
+    };
+
+    // Uncategorised first, under the default heading...
+    assert!(at("COMMANDS:") < at("build"));
+    assert!(at("build") < at("test"));
+    // ...then the named sections in order of first appearance.
+    assert!(at("test") < at("RELEASE:"));
+    assert!(at("RELEASE:") < at("publish"));
+    assert!(at("publish") < at("yank"));
+    assert!(at("yank") < at("ACCOUNT:"));
+    assert!(at("ACCOUNT:") < at("login"));
+}
+
+#[test]
+fn test_no_default_heading_when_every_command_is_categorised() {
+    let mut app = App::new("forge");
+    app.register(Command::new("publish").category("Release"));
+    let help = plain(&app.help());
+    assert!(!help.contains("COMMANDS:"), "{help}");
+    assert!(help.contains("RELEASE:"));
+}
+
+#[test]
+fn test_display_order_decides_which_section_comes_first() {
+    let mut app = App::new("forge");
+    app.register(Command::new("later").category("Second").display_order(5));
+    app.register(Command::new("sooner").category("First").display_order(1));
+    let help = plain(&app.help());
+    assert!(
+        help.find("FIRST:").unwrap() < help.find("SECOND:").unwrap(),
+        "{help}"
+    );
+}
+
+#[test]
+fn test_categorised_options_keep_help_in_the_default_section() {
+    let app = one(Command::new("get")
+        .arg(Arg::option("output").short('o'))
+        .arg(Arg::option("proxy").category("Network"))
+        .arg(Arg::option("timeout").category("Network")));
+    let help = plain(&app.command_help(["get"]).unwrap());
+    let at = |needle: &str| {
+        help.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing:\n{help}"))
+    };
+
+    assert!(at("OPTIONS:") < at("--output"));
+    assert!(at("--output") < at("--help"));
+    assert!(at("--help") < at("NETWORK:"));
+    assert!(at("NETWORK:") < at("--proxy"));
+    assert!(at("--proxy") < at("--timeout"));
+}
+
+#[test]
+fn test_app_level_options_can_be_categorised() {
+    let app = App::new("forge")
+        .version("1.0.0")
+        .arg(Arg::flag("offline").category("Network"))
+        .command(Command::new("build"));
+    let help = plain(&app.help());
+    assert!(
+        help.find("--version").unwrap() < help.find("NETWORK:").unwrap(),
+        "{help}"
+    );
+}
+
+#[test]
+fn test_categorised_subcommands_on_a_command_page() {
+    let app = one(Command::new("remote")
+        .subcommand(Command::new("list"))
+        .subcommand(Command::new("prune").category("Maintenance")));
+    let help = plain(&app.command_help(["remote"]).unwrap());
+    assert!(help.find("COMMANDS:").unwrap() < help.find("list").unwrap());
+    assert!(help.find("MAINTENANCE:").unwrap() < help.find("prune").unwrap());
+}
+
+#[test]
+fn test_descriptions_stay_aligned_across_sections() {
+    // Sections share one column width, so a reader scanning down the page sees
+    // a single straight column rather than one per section.
+    let mut app = App::new("forge");
+    app.register(Command::new("b").about("first"));
+    app.register(
+        Command::new("a-much-longer-name")
+            .category("Other")
+            .about("second"),
+    );
+    let help = plain(&app.help());
+    let column = |about: &str| {
+        let line = help.lines().find(|l| l.ends_with(about)).unwrap();
+        text::width(&line[..line.find(about).unwrap()])
+    };
+    assert_eq!(column("first"), column("second"), "{help}");
+}
+
+#[test]
 fn test_version_flag_returns_the_version() {
     let app = help_demo();
     for argv in [vec!["--version"], vec!["-V"], vec!["build", "-V"]] {

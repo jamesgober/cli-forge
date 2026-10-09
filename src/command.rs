@@ -72,6 +72,7 @@ pub struct Command {
     pub(crate) requires_auth: bool,
     pub(crate) subcommand_required: bool,
     pub(crate) order: i32,
+    pub(crate) category: Option<String>,
     pub(crate) handler: Option<Handler>,
 }
 
@@ -102,6 +103,7 @@ impl Command {
             requires_auth: false,
             subcommand_required: false,
             order: 0,
+            category: None,
             handler: None,
         }
     }
@@ -406,6 +408,36 @@ impl Command {
         self
     }
 
+    /// List this command under its own heading in its parent's help, rather
+    /// than under `COMMANDS:`.
+    ///
+    /// For an app with enough commands that one list stops being readable. The
+    /// heading is the name upper-cased with a colon, matching the built-in ones.
+    /// Uncategorised commands come first, under `COMMANDS:`; the named sections
+    /// follow in the order their first command appears, which
+    /// [`display_order`](Command::display_order) controls as usual.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Command};
+    ///
+    /// let mut app = App::new("forge");
+    /// app.register(Command::new("build"));
+    /// app.register(Command::new("publish").category("Release"));
+    /// app.register(Command::new("yank").category("Release"));
+    ///
+    /// let help = cli_forge::text::strip(&app.help()).into_owned();
+    /// assert!(help.contains("COMMANDS:"));
+    /// assert!(help.contains("RELEASE:"));
+    /// assert!(help.find("build").unwrap() < help.find("RELEASE:").unwrap());
+    /// ```
+    #[must_use]
+    pub fn category(mut self, name: impl Into<String>) -> Command {
+        self.category = Some(name.into());
+        self
+    }
+
     /// Mark the command as requiring authentication.
     ///
     /// With the `auth` feature enabled, the command runs — and appears in help —
@@ -605,6 +637,19 @@ impl Command {
         &self.subcommands
     }
 
+    /// The help heading this command is listed under, if not the default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Command;
+    /// assert_eq!(Command::new("yank").category("Release").category_name(), Some("Release"));
+    /// ```
+    #[must_use]
+    pub fn category_name(&self) -> Option<&str> {
+        self.category.as_deref()
+    }
+
     /// Whether this command is hidden from generated help.
     ///
     /// # Examples
@@ -695,6 +740,7 @@ impl fmt::Debug for Command {
         let _ = s.field("requires_auth", &self.requires_auth);
         let _ = s.field("subcommand_required", &self.subcommand_required);
         let _ = s.field("order", &self.order);
+        let _ = s.field("category", &self.category);
         let _ = s.field("has_handler", &self.handler.is_some());
         s.finish()
     }

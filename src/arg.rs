@@ -109,6 +109,7 @@ pub struct Arg {
     pub(crate) required_unless: Vec<String>,
     pub(crate) delimiter: Option<char>,
     pub(crate) negatable: bool,
+    pub(crate) category: Option<String>,
 }
 
 impl Arg {
@@ -140,6 +141,7 @@ impl Arg {
             required_unless: Vec::new(),
             delimiter: None,
             negatable: false,
+            category: None,
         }
     }
 
@@ -619,6 +621,38 @@ impl Arg {
         self
     }
 
+    /// List this argument under its own heading in help, rather than under
+    /// `OPTIONS:`.
+    ///
+    /// For a command with enough options that one list stops being readable —
+    /// network settings apart from output settings, say. The heading is the name
+    /// upper-cased with a colon, matching the built-in ones, and sections appear
+    /// in the order their first argument was declared. Positionals stay under
+    /// `ARGUMENTS:` whatever their category.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("fetch");
+    /// app.register(
+    ///     Command::new("get")
+    ///         .arg(Arg::option("output").short('o'))
+    ///         .arg(Arg::option("proxy").category("Network"))
+    ///         .arg(Arg::option("timeout").category("Network")),
+    /// );
+    ///
+    /// let help = cli_forge::text::strip(&app.command_help(["get"]).unwrap()).into_owned();
+    /// assert!(help.contains("NETWORK:"));
+    /// assert!(help.find("--output").unwrap() < help.find("NETWORK:").unwrap());
+    /// ```
+    #[must_use]
+    pub fn category(mut self, name: impl Into<String>) -> Arg {
+        self.category = Some(name.into());
+        self
+    }
+
     /// Hide the argument from generated help while leaving it usable.
     ///
     /// For an argument that exists but should not be advertised: a debugging
@@ -827,6 +861,19 @@ impl Arg {
         self.negatable && matches!(self.kind, ArgKind::Flag)
     }
 
+    /// The help heading this argument is listed under, if not the default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Arg;
+    /// assert_eq!(Arg::option("proxy").category("Network").category_name(), Some("Network"));
+    /// ```
+    #[must_use]
+    pub fn category_name(&self) -> Option<&str> {
+        self.category.as_deref()
+    }
+
     /// Whether this argument is hidden from generated help.
     ///
     /// # Examples
@@ -989,6 +1036,7 @@ impl core::fmt::Debug for Arg {
         let _ = s.field("required_unless", &self.required_unless);
         let _ = s.field("delimiter", &self.delimiter);
         let _ = s.field("negatable", &self.negatable);
+        let _ = s.field("category", &self.category);
         s.finish()
     }
 }
