@@ -364,16 +364,61 @@ mod tests {
     use super::*;
     use crate::{Theme, err, out};
 
+    /// Whether *this* thread is redirected.
+    ///
+    /// The tests assert on this rather than on [`active`], which is
+    /// process-wide: the test harness runs tests on parallel threads, so another
+    /// test's capture can legitimately hold the global count above zero at any
+    /// moment. Asserting on the counter here passed locally by timing luck and
+    /// failed on faster CI runners. The per-thread state is the invariant that
+    /// actually matters; the counter's balance is checked in `tests/capture.rs`,
+    /// a binary of its own where nothing else runs concurrently.
+    fn redirected() -> bool {
+        BUFFERS.with(|cell| cell.borrow().is_some())
+    }
+
+    /// Serialises the tests in this module.
+    ///
+    /// Only these tests capture within the library's own test binary, so holding
+    /// this while asserting on [`active`] makes the process-wide counter
+    /// observable without a race. A poisoned lock — the panic test poisons
+    /// nothing, but a failing assertion would — is recovered rather than
+    /// cascading into every later test.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn test_the_global_counter_balances() {
+        let _serial = serial();
+        assert!(!active(), "nothing should be capturing at the start");
+
+        let _ = capture(|| out("once"));
+        assert!(!active(), "a capture must release the counter");
+
+        let _ = capture(|| {
+            let _ = capture(|| out("nested"));
+            assert!(active(), "the outer capture is still running");
+        });
+        assert!(!active(), "nested captures must release it twice");
+
+        let _ = std::panic::catch_unwind(|| {
+            let _ = capture(|| panic!("deliberate"));
+        });
+        assert!(!active(), "a panic must still release the counter");
+    }
+
     #[test]
     fn test_nothing_is_captured_outside_a_capture() {
-        assert!(!active());
-        // Not asserting on the absence of output — only that the state is clean,
-        // which is what every other test in the process depends on.
-        assert!(BUFFERS.with(|cell| cell.borrow().is_none()));
+        let _serial = serial();
+        assert!(!redirected());
     }
 
     #[test]
     fn test_streams_are_recorded_separately_and_in_order() {
+        let _serial = serial();
         let (value, log) = capture(|| {
             out("one");
             err("two");
@@ -389,6 +434,7 @@ mod tests {
 
     #[test]
     fn test_lines_drops_the_trailing_newline() {
+        let _serial = serial();
         let (_, log) = capture(|| {
             out("a");
             out("b");
@@ -399,6 +445,7 @@ mod tests {
 
     #[test]
     fn test_an_empty_capture_is_empty() {
+        let _serial = serial();
         let (_, log) = capture(|| {});
         assert!(log.is_empty());
         assert_eq!(log.out(), "");
@@ -408,13 +455,14 @@ mod tests {
 
     #[test]
     fn test_state_is_restored_afterwards() {
+        let _serial = serial();
         let _ = capture(|| out("inside"));
-        assert!(!active(), "the counter must return to zero");
-        assert!(BUFFERS.with(|cell| cell.borrow().is_none()));
+        assert!(!redirected(), "the thread must be un-redirected afterwards");
     }
 
     #[test]
     fn test_nesting_keeps_the_two_apart() {
+        let _serial = serial();
         let (_, outer) = capture(|| {
             out("before");
             let (_, inner) = capture(|| out("inside"));
@@ -422,11 +470,12 @@ mod tests {
             out("after");
         });
         assert_eq!(outer.out(), "before\nafter\n");
-        assert!(!active());
+        assert!(!redirected());
     }
 
     #[test]
     fn test_a_panic_inside_the_body_still_restores() {
+        let _serial = serial();
         let result = std::panic::catch_unwind(|| {
             let _ = capture(|| {
                 out("before the panic");
@@ -434,12 +483,15 @@ mod tests {
             });
         });
         assert!(result.is_err());
-        assert!(!active(), "a panic must not leave the thread redirected");
-        assert!(BUFFERS.with(|cell| cell.borrow().is_none()));
+        assert!(
+            !redirected(),
+            "a panic must not leave the thread redirected"
+        );
     }
 
     #[test]
     fn test_themed_output_lands_on_the_right_stream() {
+        let _serial = serial();
         // The property worth testing in a real program, and the reason this
         // module exists: the stream split is the theme's responsibility, and
         // nothing else can observe it.
@@ -466,6 +518,7 @@ mod tests {
 
     #[test]
     fn test_write_to_is_captured_and_still_reports_success() {
+        let _serial = serial();
         let (result, log) = capture(|| crate::write_to(Stream::Stdout, "accountable"));
         assert!(result.is_ok());
         assert_eq!(log.out(), "accountable\n");
@@ -473,6 +526,7 @@ mod tests {
 
     #[test]
     fn test_a_value_of_any_type_comes_back() {
+        let _serial = serial();
         let (value, _) = capture(|| "borrowed");
         assert_eq!(value, "borrowed");
 
