@@ -440,15 +440,22 @@ fn test_an_exactly_one_group() {
     let none = app.try_parse_from(["dump"]).unwrap_err();
     assert_eq!(none.kind(), ErrorKind::MissingRequired);
     assert_eq!(none.subject(), "format");
-    assert!(none.detail().unwrap().contains("--json, --yaml, --toml"));
+    // The subject stays the group's name, for code that matches on it, but the
+    // message names what the user can actually type.
+    assert_eq!(
+        none.to_string(),
+        "one of --json, --yaml, --toml is required"
+    );
 
     let two = app
         .try_parse_from(["dump", "--json", "--toml"])
         .unwrap_err();
     assert_eq!(two.kind(), ErrorKind::Conflict);
-    let detail = two.detail().unwrap();
-    assert!(detail.contains("'--json' and '--toml'"), "{detail}");
-    assert!(detail.contains("'format'"), "{detail}");
+    assert_eq!(
+        two.to_string(),
+        "'--json' and '--toml' cannot be used together"
+    );
+    assert_eq!(two.detail(), Some("choose one of: --json, --yaml, --toml"));
 
     let m = app.try_parse_from(["dump", "--yaml"]).unwrap();
     assert_eq!(m.leaf().group("format"), Some("yaml"));
@@ -543,10 +550,9 @@ fn test_a_positional_can_be_a_group_member() {
     let both = app
         .try_parse_from(["read", "a.txt", "--stdin"])
         .unwrap_err();
-    assert!(
-        both.detail().unwrap().contains("'file' and '--stdin'"),
-        "{:?}",
-        both.detail()
+    assert_eq!(
+        both.to_string(),
+        "'file' and '--stdin' cannot be used together"
     );
 }
 
@@ -792,7 +798,10 @@ fn test_conflicting_arguments_are_refused() {
         .try_parse_from(["log", "--quiet", "--verbose"])
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Conflict);
-    assert!(error.detail().unwrap().contains("verbose"));
+    assert_eq!(
+        error.to_string(),
+        "'--quiet' cannot be used with '--verbose'"
+    );
 }
 
 #[test]
@@ -821,7 +830,7 @@ fn test_a_dependency_is_enforced() {
         .arg(Arg::option("key")));
     let error = app.try_parse_from(["push", "--sign"]).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::MissingDependency);
-    assert!(error.detail().unwrap().contains("key"));
+    assert_eq!(error.to_string(), "'--sign' requires '--key'");
     assert!(app.try_parse_from(["push", "--sign", "--key", "k"]).is_ok());
     // And is not demanded when the dependent argument was not used.
     assert!(app.try_parse_from(["push"]).is_ok());

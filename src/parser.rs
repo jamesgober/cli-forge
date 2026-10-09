@@ -851,11 +851,13 @@ fn check_groups(
         if !group.multiple && given.len() > 1 {
             return Err(
                 ParseError::new(ErrorKind::Conflict, display_member(declared, given[0]))
-                    .with_detail(crate::shim::format!(
-                        "'{}' and '{}' cannot be used together; '{}' accepts only one of: {}",
+                    .with_headline(crate::shim::format!(
+                        "'{}' and '{}' cannot be used together",
                         display_member(declared, given[0]),
                         display_member(declared, given[1]),
-                        group.name,
+                    ))
+                    .with_detail(crate::shim::format!(
+                        "choose one of: {}",
                         members_list(declared, group),
                     )),
             );
@@ -879,11 +881,18 @@ fn check_groups(
             // As with a required argument, a grouping command whose subcommand
             // took over cannot have been expected to answer its own group.
             None if group.required && !subcommand_invoked => {
-                return Err(
-                    ParseError::new(ErrorKind::MissingRequired, &group.name).with_detail(
-                        crate::shim::format!("provide one of: {}", members_list(declared, group)),
-                    ),
-                );
+                // The subject stays the group's name, for code matching on it,
+                // but the message names what the user can actually type.
+                let rule = if group.multiple {
+                    "at least one of"
+                } else {
+                    "one of"
+                };
+                return Err(ParseError::new(ErrorKind::MissingRequired, &group.name)
+                    .with_headline(crate::shim::format!(
+                        "{rule} {} is required",
+                        members_list(declared, group)
+                    )));
             }
             None => {}
         }
@@ -938,15 +947,25 @@ fn check_relationships(declared: &[&Arg], sink: &Sink) -> Result<(), ParseError>
         }
         for other in &arg.conflicts {
             if sink.asserted(other) {
-                return Err(ParseError::new(ErrorKind::Conflict, &arg.name).with_detail(
-                    crate::shim::format!("'{}' cannot be used with '{other}'", arg.name),
-                ));
+                return Err(
+                    ParseError::new(ErrorKind::Conflict, &arg.name).with_headline(
+                        crate::shim::format!(
+                            "'{}' cannot be used with '{}'",
+                            display_member(declared, &arg.name),
+                            display_member(declared, other)
+                        ),
+                    ),
+                );
             }
         }
         for other in &arg.requires {
             if !sink.present(other) {
                 return Err(ParseError::new(ErrorKind::MissingDependency, &arg.name)
-                    .with_detail(crate::shim::format!("'{}' requires '{other}'", arg.name)));
+                    .with_headline(crate::shim::format!(
+                        "'{}' requires '{}'",
+                        display_member(declared, &arg.name),
+                        display_member(declared, other)
+                    )));
             }
         }
     }

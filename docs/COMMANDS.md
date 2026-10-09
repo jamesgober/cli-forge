@@ -29,9 +29,13 @@
   - [Where a value came from](#where-a-value-came-from)
   - [Global arguments](#global-arguments)
   - [Relationships between arguments](#relationships-between-arguments)
+  - [Groups of arguments](#groups-of-arguments)
   - [Many values](#many-values)
+  - [Lists in one value](#lists-in-one-value)
+  - [Turning a flag off](#turning-a-flag-off)
 - [Failing well](#failing-well)
 - [Entry points](#entry-points)
+- [Plugins: external subcommands](#plugins-external-subcommands)
 - [Errors](#errors)
 - [Help](#help)
 - [Authorization](#authorization)
@@ -658,6 +662,114 @@ A **default never triggers a conflict** — only an argument the user actually
 supplied can. Otherwise an argument with a default could not conflict with
 anything.
 
+### Groups of arguments
+
+`conflicts_with` and `requires` describe **pairs**. Some rules are about a
+**set** — "exactly one output format" over three formats would be six conflict
+declarations and still say nothing about requiring one. An `ArgGroup` names the
+set once:
+
+```rust
+use cli_forge::{App, Arg, ArgGroup, Command, ErrorKind};
+
+let mut app = App::new("export");
+app.register(
+    Command::new("dump")
+        .arg(Arg::flag("json"))
+        .arg(Arg::flag("yaml"))
+        .arg(Arg::flag("toml"))
+        .group(ArgGroup::new("format").args(["json", "yaml", "toml"]).required(true)),
+);
+
+// None: refused.
+assert_eq!(app.try_parse_from(["dump"]).unwrap_err().kind(), ErrorKind::MissingRequired);
+// Two: refused.
+assert_eq!(
+    app.try_parse_from(["dump", "--json", "--yaml"]).unwrap_err().kind(),
+    ErrorKind::Conflict
+);
+// One: fine, and you can ask which.
+let m = app.try_parse_from(["dump", "--yaml"]).unwrap();
+assert_eq!(m.leaf().group("format"), Some("yaml"));
+```
+
+```console
+$ export dump
+error: one of --json, --yaml, --toml is required
+
+USAGE: export dump [options] <--json|--yaml|--toml>
+
+$ export dump --json --yaml
+error: '--json' and '--yaml' cannot be used together
+
+  choose one of: --json, --yaml, --toml
+
+USAGE: export dump [options] <--json|--yaml|--toml>
+```
+
+Note the usage line: a required group appears there, so the user sees the choice
+before they get it wrong.
+
+The rule is set by two switches:
+
+| `required` | `multiple` | Means |
+|---|---|---|
+| no | no | at most one *(default)* |
+| yes | no | exactly one |
+| yes | yes | at least one |
+| no | yes | any number — the group only names the set |
+
+`m.group("format")` answers which member was chosen, so dispatching on the
+choice is one `match`:
+
+```rust
+use cli_forge::{App, Arg, ArgGroup, Command};
+
+let mut app = App::new("export");
+app.register(
+    Command::new("dump")
+        .args([Arg::flag("json"), Arg::flag("yaml")])
+        .group(ArgGroup::new("format").args(["json", "yaml"]).required(true)),
+);
+
+let m = app.try_parse_from(["dump", "--json"]).unwrap();
+let extension = match m.leaf().group("format") {
+    Some("json") => "json",
+    _ => "yml",
+};
+assert_eq!(extension, "json");
+```
+
+**What counts as given.** For the at-most-one rule, a member counts when the
+user supplied it — on the command line or through its environment variable —
+and did not turn it off with `--no-NAME`. A **default does not count**, or a
+group whose members have defaults could never be satisfied without a conflict.
+For the at-least-one rule, any value counts, defaults included, because a
+default is an answer:
+
+```rust
+use cli_forge::{App, Arg, ArgGroup, Command};
+
+let mut app = App::new("serve");
+app.register(
+    Command::new("start")
+        .arg(Arg::option("port").default("8080"))
+        .arg(Arg::option("socket"))
+        .group(ArgGroup::new("listen").args(["port", "socket"]).required(true)),
+);
+
+// The default answers the required group...
+assert_eq!(app.try_parse_from(["start"]).unwrap().leaf().group("listen"), Some("port"));
+// ...and does not count against the user's own choice.
+assert_eq!(
+    app.try_parse_from(["start", "--socket", "/tmp/s"]).unwrap().leaf().group("listen"),
+    Some("socket")
+);
+```
+
+Positionals can be members too, which is how "a file, or `--stdin`" is said as a
+group rather than with `required_unless`.
+
 ### Many values
 
 ```rust
@@ -691,6 +803,87 @@ assert_eq!(m.leaf().value("jobs"), Some("8"));
 ```
 
 ---
+
+### Lists in one value
+
+Repeating a flag works (`-I a -I b`), but most tools also accept a list in one
+go: `--features serde,tokio`. `value_delimiter` does that:
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("cargo");
+app.register(Command::new("build").arg(Arg::option("features").short('F').value_delimiter(',')));
+
+let m = app.try_parse_from(["build", "--features", "serde,tokio", "-F", "log"]).unwrap();
+assert_eq!(m.leaf().values("features").collect::<Vec<_>>(), ["serde", "tokio", "log"]);
+```
+
+Both styles mix freely, and every attached form splits too (`--features=a,b`,
+`-Fa,b`, `-F=a,b`).
+
+Three details:
+
+- **Each piece is validated on its own.** `possible_values` sees `serde` and
+  `tokio`, not `serde,tokio` — and a typo in one piece gets its own
+  "did you mean". Every piece is checked before any is stored, so a bad one
+  leaves no partial list behind.
+- **Empty pieces are kept.** `a,,b` is three values, the middle one empty.
+  Dropping it silently would hide a typo that a validator could catch.
+- **Defaults and environment values split the same way**, so
+  `.default("linux,macos")` is two values.
+
+`value_delimiter` implies `multiple`. Help shows `[delimiter: ',']`.
+
+### Turning a flag off
+
+A setting with a default sometimes needs overriding in **either** direction —
+`--color` and `--no-color`, `--cache` and `--no-cache`. `negatable` adds the
+second spelling:
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("forge");
+app.register(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+
+let on = app.try_parse_from(["build", "--cache"]).unwrap();
+let off = app.try_parse_from(["build", "--no-cache"]).unwrap();
+let unsaid = app.try_parse_from(["build"]).unwrap();
+
+assert_eq!(on.leaf().explicit_flag("cache"), Some(true));
+assert_eq!(off.leaf().explicit_flag("cache"), Some(false));
+assert_eq!(unsaid.leaf().explicit_flag("cache"), None);
+```
+
+**Why `explicit_flag` and not `flag`?** `flag` answers `false` for both "turned
+off" and "never mentioned", which is usually what you want. When a config file
+has its own opinion, those two mean different things — only an explicit choice
+should override the file:
+
+```rust
+use cli_forge::Matches;
+
+fn use_cache(m: &Matches, from_config: bool) -> bool {
+    m.explicit_flag("cache").unwrap_or(from_config)
+}
+```
+
+The rules:
+
+- **The last spelling wins**, so `--no-cache --cache` leaves it on. That is what
+  lets a shell alias set a default the user can still flip.
+- **An explicit off never takes part in a conflict.** If `quiet` conflicts with
+  `verbose`, `--quiet --no-verbose` is accepted — the user said the opposite of
+  verbose.
+- **An explicit off does not satisfy a `requires`** or answer a group; it holds
+  no value.
+- **For an environment variable**, `0`, `false`, `no`, or `off` is an explicit
+  off on a negatable flag (on an ordinary flag it just means unset). The command
+  line still outranks it in both directions.
+- **An argument really named `no-cache` wins** over negating `cache`.
+
+Help shows one entry: `--[no-]cache`.
 
 ## Failing well
 
@@ -803,6 +996,60 @@ exit decision to `main`.
 > that. This is the one silent behaviour change in 2.0.
 
 ---
+
+## Plugins: external subcommands
+
+`cargo watch` is not part of cargo. It is a separate `cargo-watch` program that
+cargo finds and runs, passing along everything after the command name. That is
+how a tool grows plugins without knowing about them in advance — and how a suite
+can reach tools installed independently of it.
+
+`App::external` hands any command name the app does not define to a hook:
+
+```rust
+use cli_forge::{App, Command, External};
+
+let app = App::new("forge")
+    .external(|ext: &External<'_>| {
+        let program = format!("forge-{}", ext.name());
+        match std::process::Command::new(&program).args(ext.args()).status() {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => Err(format!("{program} exited with {status}")),
+            // No such program: say what they probably meant, as an unknown
+            // command would have without the hook.
+            Err(_) => Err(match ext.suggestion() {
+                Some(nearest) => format!("unknown command '{}'; did you mean '{nearest}'?", ext.name()),
+                None => format!("unknown command '{}'", ext.name()),
+            }),
+        }
+    })
+    .command(Command::new("build"));
+# let _ = app;
+```
+
+What the hook receives:
+
+| `External::` | Is |
+|---|---|
+| `name()` | The command name the user typed. |
+| `args()` | Every token after it, **unparsed** — flags included, because only the plugin knows what they mean. |
+| `matches()` | The app-level arguments parsed *before* the name, so a plugin can inherit `-vv` or `--color`. |
+| `suggestion()` | The nearest registered command, for the hook to fall back on. |
+
+The hook returns anything a handler can, so a failure becomes the exit status.
+
+The boundaries:
+
+- **Registered commands never reach the hook**, aliases included.
+- **A flag is never handed off.** `forge --bogus` is still an unknown-flag
+  error; only a bare name reaches the hook.
+- **`forge help` and a bare `forge` keep their meaning.**
+- **Parsing still has no side effects.** `try_parse_from` records the hand-off as
+  `Matches::external()` without calling the hook; `dispatch`, `run`, and
+  `try_run_from` call it.
+- **A typo of a built-in reaches the hook too**, because only the hook knows
+  whether `forge-buidl` exists. That is what `suggestion()` is for, and
+  `App::suggest(name)` gives the same answer anywhere else.
 
 ## Errors
 
@@ -951,6 +1198,49 @@ What you control:
 | Listing order | `Command::display_order` |
 | The value placeholder | `Arg::value_name` |
 | Hiding things | `Command::hidden`, `Arg::hide` |
+
+### Sections
+
+Past a dozen commands or options, one list stops being readable. `category` puts
+an item under its own heading:
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("forge");
+app.register(Command::new("build").about("compile"));
+app.register(Command::new("test").about("run the tests"));
+app.register(Command::new("publish").category("Release").about("upload a version"));
+app.register(Command::new("yank").category("Release").about("withdraw a version"));
+
+app.register(
+    Command::new("fetch")
+        .arg(Arg::option("output").short('o'))
+        .arg(Arg::option("proxy").category("Network"))
+        .arg(Arg::option("timeout").category("Network")),
+);
+
+let help = cli_forge::text::strip(&app.help()).into_owned();
+assert!(help.contains("RELEASE:"));
+```
+
+```text
+COMMANDS:
+  build    compile
+  test     run the tests
+  fetch
+
+RELEASE:
+  publish  upload a version
+  yank     withdraw a version
+```
+
+Uncategorised items come first, under the default heading. Named sections follow
+in the order their first item appears — so `display_order` still decides what
+comes first, and nothing gets alphabetised behind your back. Headings are
+upper-cased with a colon, matching the built-in ones. `-h, --help` always stays
+in the default `OPTIONS:` section, and all sections share one column width, so
+descriptions stay in a single straight column down the page.
 
 ### Rendering help yourself
 
@@ -1221,6 +1511,13 @@ refusal happens where a good message is still possible.
 **Asserting on help layout.** Assert on content; layout is presentation.
 
 **Expecting `try_parse_from` to run handlers.** It does not. Use `try_run_from`.
+
+**Spelling "exactly one of these" as pairwise conflicts.** Use an `ArgGroup`
+with `required(true)`; it is one line, and it requires one as well as forbidding
+two.
+
+**Reading `flag` when a config file has an opinion.** `flag` cannot tell "turned
+off" from "never mentioned"; `explicit_flag` can.
 
 **Putting a variadic positional before another positional.** It absorbs
 everything; put it last.

@@ -181,13 +181,20 @@ first: `set_level`; `set_color_choice`; `CLICOLOR_FORCE` / `FORCE_COLOR`;
 ### Commands
 
 `App` — `new`, `version`, `about`, `long_about`, `help_header`, `help_footer`,
-`arg`, `args`, `command`, `register`, `help_command`, `theme`, `color`, `auth`,
-`help`, `command_help`, `try_parse_from`, `try_run_from`, `dispatch`, `run`,
-`parse`.
+`arg`, `args`, `command`, `register`, `help_command`, `theme`, `color`,
+`external`, `suggest`, `auth`, `help`, `command_help`, `try_parse_from`,
+`try_run_from`, `dispatch`, `run`, `parse`.
 
 `Command` — `new`, `alias`, `aliases`, `about`, `long_about`, `before_help`,
-`after_help`, `usage`, `arg`, `args`, `subcommand`, `subcommand_required`,
-`hidden`, `display_order`, `requires_auth`, `run`, `run_status`.
+`after_help`, `usage`, `arg`, `args`, `group`, `subcommand`,
+`subcommand_required`, `hidden`, `display_order`, `category`, `requires_auth`,
+`run`, `run_status`.
+
+`External` *(2.1)* — what the hook set with `App::external` receives for a
+command the app does not define: `name`, `args` (the untouched tokens after it),
+`matches` (the app-level arguments parsed before it), and `suggestion` (the
+nearest registered command, for a hook that finds no matching program). Marked
+`#[non_exhaustive]`. A flag is never handed off; only a bare name is.
 
 **Entry points.** Four, because programs want different things:
 
@@ -204,8 +211,19 @@ first: `set_level`; `set_color_choice`; `CLICOLOR_FORCE` / `FORCE_COLOR`;
 
 `Arg` — constructors `flag`, `count`, `option`, `positional`; then `short`,
 `long`, `help`, `value_name`, `required`, `required_unless`, `conflicts_with`,
-`requires`, `multiple`, `default`, `env`, `possible_values`, `validate`, `hide`,
-`global`.
+`requires`, `multiple`, `value_delimiter`, `negatable`, `default`, `env`,
+`possible_values`, `validate`, `hide`, `global`, `category`.
+
+`ArgGroup` *(2.1)* — a rule over a set of arguments: `new`, `arg`, `args`,
+`required`, `multiple`, plus `name`, `members`, `is_required`, `is_multiple`.
+At most one member by default; `required` makes it exactly one; `required` +
+`multiple` is at least one. A default never counts against the at-most-one
+rule, and an explicit `--no-NAME` never counts as an answer.
+
+`value_delimiter(',')` *(2.1)* splits each value, so `--features a,b` is two
+values; each piece is validated on its own and empty pieces are kept.
+`negatable(true)` *(2.1)* accepts `--no-NAME` as an explicit off; the last
+spelling wins, and an explicit off never takes part in a conflict.
 
 Parsed forms: `--long`, `--long=value`, `--long value`, `-s`, `-s value`,
 `-svalue`, `-s=value`, bundled `-abc`, counting `-vvv`, repeatable options,
@@ -216,8 +234,14 @@ Precedence for a value: command line, then environment, then default.
 
 ### Results
 
-`Matches` — `flag`, `count`, `present`, `value`, `values`, `source`, `get`,
-`try_get`, `get_all`, `subcommand`, `subcommand_name`, `command_path`, `leaf`.
+`Matches` — `flag`, `explicit_flag`, `count`, `present`, `value`, `values`,
+`source`, `get`, `try_get`, `get_all`, `group`, `external`, `subcommand`,
+`subcommand_name`, `command_path`, `leaf`.
+
+`explicit_flag` answers `Some(true)`, `Some(false)` (a negatable flag turned
+off), or `None` (never mentioned) — the distinction `flag` collapses. `group`
+names the member that answered an `ArgGroup`. `external` is the name and raw
+arguments of an external subcommand, set only when `App::external` is.
 
 `ValueSource` — `CommandLine`, `Environment`, `Default`.
 
@@ -235,6 +259,10 @@ infallibly; `try_get` reports why an unvalidated value would not parse.
 `VersionRequested`, plus `is_request()`. Marked `#[non_exhaustive]`.
 
 `CommandError` — `new`, `with_code`, `message`, `exit_code`.
+
+A broken `ArgGroup` reports through the existing kinds: `MissingRequired` with
+the group's name as the subject when nothing answered it, `Conflict` when two
+members were given to a group that allows one.
 
 `Outcome` — what a `run` handler may return: `()`, or any `Result<(), E>` where
 `E: Display`.
@@ -261,8 +289,9 @@ hand-maintained description of the same CLI.
 | Type | Accessors |
 |---|---|
 | `App` | `name`, `version_text`, `commands`, `global_arguments` |
-| `Command` | `name`, `alias_names`, `about_text`, `arguments`, `subcommands`, `is_hidden`, `is_auth_gated` |
-| `Arg` | `name`, `short_form`, `long_form`, `help_text`, `default_value`, `env_var`, `allowed_values`, `is_required`, `is_multiple`, `is_hidden`, `is_global`, `expects_value`, `is_positional` |
+| `Command` | `name`, `alias_names`, `about_text`, `arguments`, `groups`, `subcommands`, `category_name`, `is_hidden`, `is_auth_gated` |
+| `Arg` | `name`, `short_form`, `long_form`, `help_text`, `default_value`, `env_var`, `allowed_values`, `delimiter`, `category_name`, `is_required`, `is_multiple`, `is_negatable`, `is_hidden`, `is_global`, `expects_value`, `is_positional` |
+| `ArgGroup` | `name`, `members`, `is_required`, `is_multiple` |
 
 ---
 

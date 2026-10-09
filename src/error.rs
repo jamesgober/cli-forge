@@ -151,6 +151,9 @@ struct Report {
     usage: Option<String>,
     /// The rendered help or version text, for the two request kinds.
     payload: Option<String>,
+    /// A specific one-line message replacing the kind's generic one, for the
+    /// cases where the generic wording would mislead.
+    headline: Option<String>,
 }
 
 impl ParseError {
@@ -164,6 +167,7 @@ impl ParseError {
                 suggestion: None,
                 usage: None,
                 payload: None,
+                headline: None,
             }),
         }
     }
@@ -178,6 +182,15 @@ impl ParseError {
     /// Attach the explanation of what would have been acceptable.
     pub(crate) fn with_detail(mut self, detail: impl Into<String>) -> ParseError {
         self.inner.detail = Some(detail.into());
+        self
+    }
+
+    /// Replace the kind's generic one-line message with a specific one.
+    ///
+    /// For an error whose subject is not something the user typed — a group's
+    /// name — or whose generic wording says less than the specific facts do.
+    pub(crate) fn with_headline(mut self, headline: impl Into<String>) -> ParseError {
+        self.inner.headline = Some(headline.into());
         self
     }
 
@@ -456,6 +469,9 @@ impl ParseError {
 
     /// The one-line description of what went wrong, without decoration.
     fn message(&self) -> String {
+        if let Some(headline) = &self.inner.headline {
+            return headline.clone();
+        }
         let subject = &self.inner.subject;
         match self.inner.kind {
             ErrorKind::UnknownFlag => crate::shim::format!("unknown flag '{subject}'"),
