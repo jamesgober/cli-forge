@@ -9,7 +9,14 @@
 //! duration of a closure, so the assertion is an ordinary one:
 //!
 //! ```
-//! use cli_forge::{capture, ok, out, warn};
+//! use cli_forge::{capture, ok, out, warn, terminal, ColorChoice, Glyphs, Theme};
+//!
+//! // Pin what the terminal would otherwise decide. Under the defaults, `✓`
+//! // falls back to `+` where it cannot be drawn, and colour is on wherever the
+//! // environment forces it — both right for a program, both wrong for an
+//! // assertion, which must not depend on where the test happens to run.
+//! terminal::set_color_choice(ColorChoice::Never);
+//! Theme::new().set_glyphs(Glyphs::Unicode).install();
 //!
 //! let (_, log) = capture(|| {
 //!     out("building...");
@@ -125,9 +132,11 @@ impl Captured {
     /// # Examples
     ///
     /// ```
-    /// use cli_forge::{capture, fail, Theme};
+    /// use cli_forge::{capture, fail, Glyphs, Theme};
     ///
-    /// # Theme::new().install();
+    /// // Pinned, so the assertion holds whatever the terminal is.
+    /// cli_forge::terminal::set_color_choice(cli_forge::ColorChoice::Never);
+    /// Theme::new().set_glyphs(Glyphs::Unicode).install();
     /// let (_, log) = capture(|| fail("it broke"));
     /// assert!(log.err().contains("it broke"));
     /// assert_eq!(log.out(), "", "a failure must not go to standard output");
@@ -185,9 +194,11 @@ impl Captured {
     /// # Examples
     ///
     /// ```
-    /// use cli_forge::{capture, ok, out, Theme};
+    /// use cli_forge::{capture, ok, out, Glyphs, Theme};
     ///
-    /// # Theme::new().install();
+    /// // Pinned, so the assertion holds whatever the terminal is.
+    /// cli_forge::terminal::set_color_choice(cli_forge::ColorChoice::Never);
+    /// Theme::new().set_glyphs(Glyphs::Unicode).install();
     /// let (_, log) = capture(|| {
     ///     out("building...");
     ///     ok("done");
@@ -244,9 +255,11 @@ impl Drop for Guard {
 /// Testing an invocation's printing and its outcome together:
 ///
 /// ```
-/// use cli_forge::{capture, ok, App, Command, Theme};
+/// use cli_forge::{capture, ok, App, Command, Glyphs, Theme};
 ///
-/// # Theme::new().install();
+/// // Pinned, so the assertion holds whatever the terminal is.
+/// cli_forge::terminal::set_color_choice(cli_forge::ColorChoice::Never);
+/// Theme::new().set_glyphs(Glyphs::Unicode).install();
 /// let mut app = App::new("forge");
 /// app.register(Command::new("build").run(|_| ok("compiled 3 targets")));
 ///
@@ -377,17 +390,16 @@ mod tests {
         BUFFERS.with(|cell| cell.borrow().is_some())
     }
 
-    /// Serialises the tests in this module.
+    /// Serialises the tests in this module, against each other and against
+    /// every other test that touches process-wide presentation state.
     ///
-    /// Only these tests capture within the library's own test binary, so holding
-    /// this while asserting on [`active`] makes the process-wide counter
-    /// observable without a race. A poisoned lock — the panic test poisons
-    /// nothing, but a failing assertion would — is recovered rather than
-    /// cascading into every later test.
+    /// Two reasons. Only these tests capture within the library's own test
+    /// binary, so holding the lock while asserting on [`active`] makes the
+    /// process-wide counter observable without a race. And the themed assertions
+    /// depend on the colour choice and the installed theme, which other tests
+    /// change.
     fn serial() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::global_state_lock()
     }
 
     #[test]

@@ -606,9 +606,24 @@ fn detect_unicode() -> bool {
 mod tests {
     use super::*;
 
-    /// Restore the global colour state after a test that perturbs it, so test
-    /// order cannot matter even though the state is process-wide.
-    struct Restore;
+    /// Hold the crate-wide test lock for the duration of a test that perturbs
+    /// the colour state, and put the state back afterwards.
+    ///
+    /// The lock is what makes these tests correct rather than merely tidy: they
+    /// run on parallel threads, and one setting `Never` while another asserts on
+    /// `Always` is a race. The reset runs in `drop` before the guard field is
+    /// released, so the next test always starts from `Auto`.
+    struct Restore {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Restore {
+        fn new() -> Restore {
+            Restore {
+                _lock: crate::global_state_lock(),
+            }
+        }
+    }
 
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -619,7 +634,7 @@ mod tests {
 
     #[test]
     fn test_forced_level_applies_to_every_stream() {
-        let _restore = Restore;
+        let _restore = Restore::new();
         set_level(ColorLevel::Ansi256);
         assert_eq!(level(Stream::Stdout), ColorLevel::Ansi256);
         assert_eq!(level(Stream::Stderr), ColorLevel::Ansi256);
@@ -627,7 +642,7 @@ mod tests {
 
     #[test]
     fn test_never_silences_every_stream() {
-        let _restore = Restore;
+        let _restore = Restore::new();
         set_color_choice(ColorChoice::Never);
         assert!(level(Stream::Stdout).is_none());
         assert!(level(Stream::Stderr).is_none());
@@ -635,14 +650,14 @@ mod tests {
 
     #[test]
     fn test_always_enables_colour_without_a_terminal() {
-        let _restore = Restore;
+        let _restore = Restore::new();
         set_color_choice(ColorChoice::Always);
         assert!(!level(Stream::Stdout).is_none());
     }
 
     #[test]
     fn test_forced_level_outranks_never() {
-        let _restore = Restore;
+        let _restore = Restore::new();
         set_color_choice(ColorChoice::Never);
         set_level(ColorLevel::TrueColor);
         assert_eq!(level(Stream::Stdout), ColorLevel::TrueColor);
@@ -650,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_override_invalidates_a_cached_answer() {
-        let _restore = Restore;
+        let _restore = Restore::new();
         // Resolve and cache one answer, then change the choice and observe that
         // the cache did not freeze it.
         set_color_choice(ColorChoice::Never);

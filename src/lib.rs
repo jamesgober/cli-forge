@@ -215,6 +215,21 @@ mod registry;
 #[cfg(all(test, feature = "color"))]
 mod crosspath_tests;
 
+/// Serialises the tests that change process-wide presentation state.
+///
+/// The colour choice, the forced depth, and the installed theme are global by
+/// design, and the test harness runs tests on parallel threads. A test that sets
+/// `ColorChoice::Never` while another asserts on what `Always` renders is a race,
+/// and several of them passed only by timing luck until CI's runners exposed it.
+/// Every test that writes that state, or asserts on output that depends on it,
+/// takes this lock first. A poisoned lock is recovered rather than cascading.
+#[cfg(test)]
+pub(crate) fn global_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The prose documentation, compiled as doctests.
 ///
 /// Documentation that is never executed rots, and a guide whose first example

@@ -14,9 +14,28 @@ use cli_forge::{
     hint, markup, named, ok, out, style, terminal, text, warn,
 };
 
-/// Keep the process-wide presentation state as it was found, so these tests
-/// cannot disturb each other or the rest of the suite.
-struct Restore;
+/// Hold a lock for the whole test and put the process-wide presentation state
+/// back afterwards.
+///
+/// The theme and the colour choice are global, and these tests run on parallel
+/// threads: without the lock, one test's reset to the default theme could land
+/// between another's `install` and its assertion. That race was invisible while
+/// the default glyph was also `✓`, and failed 7 runs in 10 with Unicode
+/// detection off.
+struct Restore {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Restore {
+    fn new() -> Restore {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        Restore {
+            _lock: LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        }
+    }
+}
 
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -79,7 +98,7 @@ fn readme_quick_start_runs() {
 
 #[test]
 fn readme_themed_output() {
-    let _restore = Restore;
+    let _restore = Restore::new();
 
     Theme::new()
         .set(Level::Success, Style::new().bright_green().bold(), "✓")
@@ -123,7 +142,7 @@ fn readme_reusable_styles() {
 
 #[test]
 fn readme_four_paths() {
-    let _restore = Restore;
+    let _restore = Restore::new();
 
     out(style("ERROR: build failed").red().bold());
     out(markup("<c=red><b>ERROR: build failed</b></c>"));
@@ -179,7 +198,7 @@ fn readme_markup_grammar() {
 
 #[test]
 fn readme_colours() {
-    let _restore = Restore;
+    let _restore = Restore::new();
 
     out(style("amber").hex("#ff8800"));
     out(style("teal").rgb(0, 200, 120));

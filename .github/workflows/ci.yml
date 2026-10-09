@@ -77,6 +77,30 @@ jobs:
       - name: Test
         run: cargo test ${{ matrix.features }}
 
+  environments:
+    name: Hostile environment (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each of these changes what the terminal layer decides. A test that
+        # passes only because the runner happens to be a pipe with a UTF-8
+        # locale is a test that will fail for a user -- this job finds them on
+        # purpose instead of by luck.
+        env:
+          - "NO_UNICODE=1"
+          - "CLICOLOR_FORCE=1"
+          - "FORCE_COLOR=1 NO_UNICODE=1"
+          - "NO_COLOR=1"
+          - "TERM=dumb"
+          - "COLUMNS=40"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: env ${{ matrix.env }} cargo test --all-features --no-fail-fast
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

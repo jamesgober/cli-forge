@@ -845,11 +845,14 @@ To run the handler, use `try_run_from` and assert on the outcome.
 ## Assert on what the program printed
 
 ```rust
-use cli_forge::{capture, ok, out, warn, Stream, Theme};
+use cli_forge::{capture, ok, out, terminal, warn, ColorChoice, Glyphs, Stream, Theme};
 
 fn main() {
     // #[test] fn reports_on_the_right_streams()
-    Theme::new().install();
+    // Pinned: otherwise some terminals print `+` instead of `✓`, and
+    // FORCE_COLOR puts escape codes in what was captured.
+    terminal::set_color_choice(ColorChoice::Never);
+    Theme::new().set_glyphs(Glyphs::Unicode).install();
 
     let (_, log) = capture(|| {
         out("building...");
@@ -867,7 +870,9 @@ fn main() {
 ```
 
 Per-thread, so it is safe in parallel tests. It sees what went through this
-crate, not `println!` or a child process.
+crate, not `println!` or a child process. Pin the glyphs and the colour
+choice as above: the defaults come from the terminal, so an unpinned assertion
+passes locally and fails on CI.
 
 ---
 

@@ -1416,11 +1416,16 @@ file descriptor — so the usual answer is to spawn the binary and read its pipe
 `capture` makes it an ordinary assertion instead:
 
 ```rust
-use cli_forge::{capture, ok, out, warn, App, Command, Theme};
+use cli_forge::{capture, ok, out, terminal, warn, App, ColorChoice, Command, Glyphs, Theme};
 
 fn main() {
     // #[test] fn build_reports_what_it_did()
-    Theme::new().install();
+    //
+    // Pin what the terminal would otherwise decide: under the defaults `✓`
+    // becomes `+` where it cannot be drawn, and colour is on wherever
+    // FORCE_COLOR is set. A test must not depend on where it runs.
+    terminal::set_color_choice(ColorChoice::Never);
+    Theme::new().set_glyphs(Glyphs::Unicode).install();
 
     let mut app = App::new("forge");
     app.register(Command::new("build").run(|_| {
@@ -1449,6 +1454,15 @@ Two things to know:
 
 - **It is per-thread**, so tests that capture run in parallel with tests that
   print, and a thread spawned inside the closure is not captured.
+- **Pin anything that depends on the environment.** The theme's glyphs and the
+  colour depth are decided by the terminal, so an assertion on `✓` passes on your
+  machine and fails on a CI runner that falls back to `+` — or that sets
+  `FORCE_COLOR`, which puts escape codes in the captured text. In tests, call
+  `terminal::set_color_choice(ColorChoice::Never)` and install the theme with
+  `set_glyphs(Glyphs::Unicode)` (or `Glyphs::Ascii`). A capture records exactly
+  the bytes that would have been written, which is why both matter. The theme is also process-wide, so tests
+  that install different themes should not run in parallel with each other —
+  have each take a shared `Mutex`.
 - **It sees only what went through this crate.** Not `println!`, not a direct
   write to `std::io::stdout`, and not a child process. And only the entry points
   that print at all print: `try_run_from` and `try_parse_from` hand failures back

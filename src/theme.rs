@@ -844,6 +844,7 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn test_install_and_current_round_trip() {
+        let _lock = crate::global_state_lock();
         // Leave the process theme as it was found, so test order cannot matter.
         let saved = Theme::current();
         Theme::new().set_glyphs(Glyphs::Ascii).install();
