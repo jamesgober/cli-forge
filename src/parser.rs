@@ -104,6 +104,20 @@ impl Sink<'_> {
     fn flag(&self, name: &str) -> bool {
         self.level.flag(name) || self.globals.flag(name)
     }
+
+    /// Whether the flag `name` was explicitly turned off in either slot.
+    fn negated(&self, name: &str) -> bool {
+        self.level.negated.contains(name) || self.globals.negated.contains(name)
+    }
+
+    /// Whether `name` was supplied on the command line *and* left on.
+    ///
+    /// The test for taking part in a conflict: `--no-verbose --quiet` must not
+    /// be refused as "verbose conflicts with quiet", because the user said the
+    /// opposite of verbose.
+    fn asserted(&self, name: &str) -> bool {
+        self.source(name) == Some(ValueSource::CommandLine) && !self.negated(name)
+    }
 }
 
 fn is_help(token: &str) -> bool {
@@ -185,9 +199,18 @@ fn bump_count(matches: &mut Matches, name: &str) {
     let _ = matches.counts.insert(name.to_owned(), 1);
 }
 
-/// Mark a boolean flag as set.
+/// Mark a boolean flag as set, undoing any earlier `--no-NAME` so the last one
+/// written wins.
 fn set_flag(matches: &mut Matches, arg: &Arg, source: ValueSource) {
+    let _ = matches.negated.remove(&arg.name);
     let _ = matches.flags.insert(arg.name.clone());
+    let _ = matches.sources.insert(arg.name.clone(), source);
+}
+
+/// Mark a negatable flag as explicitly off, undoing any earlier `--NAME`.
+fn negate(matches: &mut Matches, arg: &Arg, source: ValueSource) {
+    let _ = matches.flags.remove(&arg.name);
+    let _ = matches.negated.insert(arg.name.clone());
     let _ = matches.sources.insert(arg.name.clone(), source);
 }
 
@@ -527,18 +550,49 @@ fn parse_long(
     };
     let written = Written::Long(name);
 
+    // `--no-NAME` on a negatable flag. Checked only once `NAME` itself has
+    // failed to match, so an argument genuinely called `no-cache` still wins.
+    if command.find_long(name, extra).is_none() {
+        if let Some(positive) = name.strip_prefix("no-") {
+            if let Some(arg) = command
+                .find_long(positive, extra)
+                .filter(|arg| arg.is_negatable())
+            {
+                if inline.is_some() {
+                    return Err(ParseError::new(
+                        ErrorKind::UnexpectedArgument,
+                        crate::shim::format!("--{body}"),
+                    )
+                    .with_detail(crate::shim::format!("'--{name}' takes no value")));
+                }
+                negate(sink.target(arg), arg, ValueSource::CommandLine);
+                return Ok(i + 1);
+            }
+        }
+    }
+
     let Some(arg) = command.find_long(name, extra) else {
         let mut error = ParseError::new(ErrorKind::UnknownFlag, crate::shim::format!("--{body}"));
-        let candidates: Vec<&str> = command
+        let candidates: Vec<String> = command
             .args
             .iter()
             .chain(extra.iter().copied())
             .filter(|a| !a.hidden)
             .filter_map(Arg::long_name)
-            .chain(["help"])
-            .chain(cli.version.map(|_| "version"))
+            .map(crate::shim::ToString::to_string)
+            .chain(
+                command
+                    .args
+                    .iter()
+                    .chain(extra.iter().copied())
+                    .filter(|a| !a.hidden && a.is_negatable())
+                    .filter_map(Arg::long_name)
+                    .map(|long| crate::shim::format!("no-{long}")),
+            )
+            .chain(["help".to_owned()])
+            .chain(cli.version.map(|_| "version".to_owned()))
             .collect();
-        if let Some(nearest) = did_you_mean(name, candidates) {
+        if let Some(nearest) = did_you_mean(name, candidates.iter().map(String::as_str)) {
             error = error.with_suggestion(crate::shim::format!("--{nearest}"));
         }
         return Err(error);
@@ -712,7 +766,11 @@ fn finalize(
                 continue;
             }
         } else {
-            if sink.flag(&arg.name) {
+            if sink.flag(&arg.name) || sink.negated(&arg.name) {
+                continue;
+            }
+            if arg.is_negatable() && env_value(arg).is_some_and(|value| !truthy(&value)) {
+                negate(sink.target(arg), arg, ValueSource::Environment);
                 continue;
             }
             if env_value(arg).is_some_and(|value| truthy(&value)) {
@@ -770,11 +828,11 @@ fn check_relationships(declared: &[&Arg], sink: &Sink) -> Result<(), ParseError>
     for arg in declared {
         // Only an argument the user actually supplied can conflict with
         // anything: a default or an inherited environment value must not.
-        if sink.source(&arg.name) != Some(ValueSource::CommandLine) {
+        if !sink.asserted(&arg.name) {
             continue;
         }
         for other in &arg.conflicts {
-            if sink.source(other) == Some(ValueSource::CommandLine) {
+            if sink.asserted(other) {
                 return Err(ParseError::new(ErrorKind::Conflict, &arg.name).with_detail(
                     crate::shim::format!("'{}' cannot be used with '{other}'", arg.name),
                 ));

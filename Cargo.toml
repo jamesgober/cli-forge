@@ -163,6 +163,10 @@ required-features = ["std"]
 name             = "readme"
 required-features = ["std"]
 
+[[test]]
+name             = "env"
+required-features = ["std"]
+
 
 # RELEASE PROFILE
 # #################################

@@ -307,6 +307,123 @@ fn test_help_states_the_delimiter() {
 }
 
 #[test]
+fn test_a_negatable_flag_has_three_states() {
+    let app = one(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+
+    let on = app.try_parse_from(["build", "--cache"]).unwrap();
+    assert_eq!(on.leaf().explicit_flag("cache"), Some(true));
+    assert!(on.leaf().flag("cache"));
+
+    let off = app.try_parse_from(["build", "--no-cache"]).unwrap();
+    assert_eq!(off.leaf().explicit_flag("cache"), Some(false));
+    assert!(!off.leaf().flag("cache"));
+    assert_eq!(off.leaf().source("cache"), Some(ValueSource::CommandLine));
+    // Off holds no value, so it does not satisfy a `requires`.
+    assert!(!off.leaf().present("cache"));
+
+    let unsaid = app.try_parse_from(["build"]).unwrap();
+    assert_eq!(unsaid.leaf().explicit_flag("cache"), None);
+}
+
+#[test]
+fn test_the_last_spelling_wins() {
+    let app = one(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+    let m = app
+        .try_parse_from(["build", "--no-cache", "--cache"])
+        .unwrap();
+    assert_eq!(m.leaf().explicit_flag("cache"), Some(true));
+    let m = app
+        .try_parse_from(["build", "--cache", "--no-cache"])
+        .unwrap();
+    assert_eq!(m.leaf().explicit_flag("cache"), Some(false));
+}
+
+#[test]
+fn test_negation_is_opt_in() {
+    let app = one(Command::new("build").arg(Arg::flag("cache")));
+    assert_eq!(
+        app.try_parse_from(["build", "--no-cache"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnknownFlag
+    );
+}
+
+#[test]
+fn test_a_negated_flag_takes_no_value() {
+    let app = one(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+    let error = app.try_parse_from(["build", "--no-cache=yes"]).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::UnexpectedArgument);
+}
+
+#[test]
+fn test_an_argument_really_named_no_something_wins() {
+    let app = one(Command::new("build")
+        .arg(Arg::flag("cache").negatable(true))
+        .arg(Arg::flag("no-cache")));
+    let m = app.try_parse_from(["build", "--no-cache"]).unwrap();
+    assert!(m.leaf().flag("no-cache"));
+    assert_eq!(m.leaf().explicit_flag("cache"), None);
+}
+
+#[test]
+fn test_an_explicit_off_never_conflicts() {
+    let app = one(Command::new("log")
+        .arg(Arg::flag("quiet").conflicts_with(["verbose"]))
+        .arg(Arg::flag("verbose").negatable(true)));
+    assert!(
+        app.try_parse_from(["log", "--quiet", "--no-verbose"])
+            .is_ok()
+    );
+    assert_eq!(
+        app.try_parse_from(["log", "--quiet", "--verbose"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Conflict
+    );
+}
+
+#[test]
+fn test_an_explicit_off_does_not_satisfy_a_dependency() {
+    let app = one(Command::new("push")
+        .arg(Arg::flag("sign").requires(["verify"]))
+        .arg(Arg::flag("verify").negatable(true)));
+    assert_eq!(
+        app.try_parse_from(["push", "--sign", "--no-verify"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::MissingDependency
+    );
+    assert!(app.try_parse_from(["push", "--sign", "--verify"]).is_ok());
+}
+
+#[test]
+fn test_a_near_miss_on_the_negative_spelling_is_corrected() {
+    let app = one(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+    let error = app.try_parse_from(["build", "--no-cahce"]).unwrap_err();
+    assert_eq!(error.suggestion(), Some("--no-cache"));
+}
+
+#[test]
+fn test_a_global_negatable_flag_works_on_either_side() {
+    let mut app = App::new("demo").arg(Arg::flag("color").negatable(true).global(true));
+    app.register(Command::new("build"));
+    for argv in [vec!["--no-color", "build"], vec!["build", "--no-color"]] {
+        let m = app.try_parse_from(argv.clone()).unwrap();
+        assert_eq!(m.leaf().explicit_flag("color"), Some(false), "{argv:?}");
+        assert_eq!(m.explicit_flag("color"), Some(false), "{argv:?}");
+    }
+}
+
+#[test]
+fn test_help_shows_both_spellings_in_one_entry() {
+    let app =
+        one(Command::new("build").arg(Arg::flag("cache").negatable(true).help("reuse outputs")));
+    let help = plain(&app.command_help(["build"]).unwrap());
+    assert!(help.contains("--[no-]cache"), "{help}");
+}
+
+#[test]
 fn test_a_single_valued_option_is_last_wins() {
     let app = one(Command::new("build").arg(Arg::option("jobs")));
     let m = app

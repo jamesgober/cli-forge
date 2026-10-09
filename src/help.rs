@@ -441,6 +441,10 @@ fn option_signature(arg: &Arg) -> String {
     };
     if let Some(long) = arg.long_name() {
         left.push_str("--");
+        // The conventional way to say one entry accepts both spellings.
+        if arg.is_negatable() {
+            left.push_str("[no-]");
+        }
         left.push_str(long);
     }
     if arg.kind == ArgKind::Option {

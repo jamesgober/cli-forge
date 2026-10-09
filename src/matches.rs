@@ -79,6 +79,8 @@ pub enum ValueSource {
 #[derive(Clone, Debug, Default)]
 pub struct Matches {
     pub(crate) flags: HashSet<String>,
+    /// Negatable flags explicitly turned off with `--no-NAME`.
+    pub(crate) negated: HashSet<String>,
     pub(crate) counts: HashMap<String, usize>,
     pub(crate) values: HashMap<String, Vec<String>>,
     pub(crate) sources: HashMap<String, ValueSource>,
@@ -106,6 +108,46 @@ impl Matches {
     #[must_use]
     pub fn flag(&self, name: &str) -> bool {
         self.flags.contains(name) || self.count(name) > 0
+    }
+
+    /// Whether the flag `name` was explicitly turned on, explicitly turned off,
+    /// or not mentioned at all.
+    ///
+    /// `Some(true)` for `--NAME`, `Some(false)` for `--no-NAME` on a
+    /// [negatable](crate::Arg::negatable) flag, and `None` when nothing said
+    /// either. [`flag`](Matches::flag) collapses the last two into `false`; this
+    /// keeps them apart, which is what a program needs when a config file has
+    /// its own value and only an explicit choice should override it.
+    ///
+    /// An environment fallback counts as explicit, because the user set it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("forge");
+    /// app.register(Command::new("build").arg(Arg::flag("color").negatable(true)));
+    ///
+    /// fn colour(from_config: bool, m: &cli_forge::Matches) -> bool {
+    ///     m.explicit_flag("color").unwrap_or(from_config)
+    /// }
+    ///
+    /// let m = app.try_parse_from(["build", "--no-color"]).unwrap();
+    /// assert!(!colour(true, m.leaf()));
+    ///
+    /// let m = app.try_parse_from(["build"]).unwrap();
+    /// assert!(colour(true, m.leaf()));
+    /// ```
+    #[must_use]
+    pub fn explicit_flag(&self, name: &str) -> Option<bool> {
+        if self.negated.contains(name) {
+            Some(false)
+        } else if self.flag(name) {
+            Some(true)
+        } else {
+            None
+        }
     }
 
     /// How many times the [counting flag](crate::Arg::count) named `name` was
@@ -431,6 +473,9 @@ impl Matches {
     pub(crate) fn merge_globals(&mut self, globals: &Matches) {
         for name in &globals.flags {
             let _ = self.flags.insert(name.clone());
+        }
+        for name in &globals.negated {
+            let _ = self.negated.insert(name.clone());
         }
         for (name, &count) in &globals.counts {
             let _ = self.counts.insert(name.clone(), count);

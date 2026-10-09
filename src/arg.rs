@@ -108,6 +108,7 @@ pub struct Arg {
     pub(crate) requires: Vec<String>,
     pub(crate) required_unless: Vec<String>,
     pub(crate) delimiter: Option<char>,
+    pub(crate) negatable: bool,
 }
 
 impl Arg {
@@ -138,6 +139,7 @@ impl Arg {
             requires: Vec::new(),
             required_unless: Vec::new(),
             delimiter: None,
+            negatable: false,
         }
     }
 
@@ -453,6 +455,46 @@ impl Arg {
     pub fn value_delimiter(mut self, delimiter: char) -> Arg {
         self.delimiter = Some(delimiter);
         self.multiple = true;
+        self
+    }
+
+    /// Accept `--no-NAME` as an explicit "off" for this flag.
+    ///
+    /// For a setting that has a default the user may want to override in either
+    /// direction — `--color` / `--no-color`, `--cache` / `--no-cache`. The last
+    /// one written wins, so `--no-cache --cache` leaves it on, which is what lets
+    /// a shell alias set a default the user can still flip.
+    ///
+    /// [`Matches::flag`](crate::Matches::flag) is `false` after `--no-NAME`, the
+    /// same as when nothing was said. To tell those two apart — which is the
+    /// point, when a config file has its own opinion — use
+    /// [`Matches::explicit_flag`](crate::Matches::explicit_flag), which answers
+    /// `Some(true)`, `Some(false)`, or `None`.
+    ///
+    /// An environment variable set to `0`, `false`, `no`, or `off` also counts as
+    /// an explicit "off" for a negatable flag, rather than as unset. Only
+    /// meaningful on a [`flag`](Arg::flag); ignored on anything else. Help shows
+    /// it as `--[no-]NAME`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("forge");
+    /// app.register(Command::new("build").arg(Arg::flag("cache").negatable(true)));
+    ///
+    /// let on = app.try_parse_from(["build", "--cache"]).unwrap();
+    /// let off = app.try_parse_from(["build", "--no-cache"]).unwrap();
+    /// let unsaid = app.try_parse_from(["build"]).unwrap();
+    ///
+    /// assert_eq!(on.leaf().explicit_flag("cache"), Some(true));
+    /// assert_eq!(off.leaf().explicit_flag("cache"), Some(false));
+    /// assert_eq!(unsaid.leaf().explicit_flag("cache"), None);
+    /// ```
+    #[must_use]
+    pub fn negatable(mut self, negatable: bool) -> Arg {
+        self.negatable = negatable;
         self
     }
 
@@ -772,6 +814,19 @@ impl Arg {
         self.delimiter
     }
 
+    /// Whether this flag also accepts `--no-NAME`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Arg;
+    /// assert!(Arg::flag("cache").negatable(true).is_negatable());
+    /// ```
+    #[must_use]
+    pub const fn is_negatable(&self) -> bool {
+        self.negatable && matches!(self.kind, ArgKind::Flag)
+    }
+
     /// Whether this argument is hidden from generated help.
     ///
     /// # Examples
@@ -933,6 +988,7 @@ impl core::fmt::Debug for Arg {
         let _ = s.field("requires", &self.requires);
         let _ = s.field("required_unless", &self.required_unless);
         let _ = s.field("delimiter", &self.delimiter);
+        let _ = s.field("negatable", &self.negatable);
         s.finish()
     }
 }
