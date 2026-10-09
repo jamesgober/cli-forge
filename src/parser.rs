@@ -146,6 +146,18 @@ fn record(
     written: Written<'_>,
     source: ValueSource,
 ) -> Result<(), ParseError> {
+    if let Some(delimiter) = arg.delimiter {
+        // Every piece is checked before any is stored, so a bad piece leaves no
+        // partial list behind.
+        for piece in value.split(delimiter) {
+            arg.check(piece, written)?;
+        }
+        let list = matches.values.entry(arg.name.clone()).or_default();
+        list.extend(value.split(delimiter).map(str::to_owned));
+        let _ = matches.sources.insert(arg.name.clone(), source);
+        return Ok(());
+    }
+
     arg.check(&value, written)?;
     if arg.multiple {
         matches

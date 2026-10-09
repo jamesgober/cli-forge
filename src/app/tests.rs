@@ -227,6 +227,86 @@ fn test_a_repeatable_option_collects_every_occurrence() {
 }
 
 #[test]
+fn test_a_delimited_option_splits_and_accumulates() {
+    let app =
+        one(Command::new("build").arg(Arg::option("features").short('F').value_delimiter(',')));
+    for argv in [
+        vec!["build", "--features", "a,b", "--features", "c"],
+        vec!["build", "--features=a,b", "-F", "c"],
+        vec!["build", "-Fa,b", "-F=c"],
+    ] {
+        let m = app.try_parse_from(argv.clone()).unwrap();
+        assert_eq!(
+            m.leaf().values("features").collect::<Vec<_>>(),
+            ["a", "b", "c"],
+            "{argv:?}"
+        );
+    }
+}
+
+#[test]
+fn test_every_delimited_piece_is_validated() {
+    let app = one(Command::new("build").arg(
+        Arg::option("features")
+            .value_delimiter(',')
+            .possible_values(["serde", "log"]),
+    ));
+    assert!(
+        app.try_parse_from(["build", "--features", "serde,log"])
+            .is_ok()
+    );
+
+    let error = app
+        .try_parse_from(["build", "--features", "serde,lgo"])
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidValue);
+    assert_eq!(error.subject(), "lgo");
+    assert_eq!(error.suggestion(), Some("log"));
+}
+
+#[test]
+fn test_empty_delimited_pieces_are_kept_not_dropped() {
+    let app = one(Command::new("build").arg(Arg::option("features").value_delimiter(',')));
+    let m = app.try_parse_from(["build", "--features", "a,,b"]).unwrap();
+    assert_eq!(
+        m.leaf().values("features").collect::<Vec<_>>(),
+        ["a", "", "b"]
+    );
+}
+
+#[test]
+fn test_a_delimited_default_is_split_too() {
+    let app = one(Command::new("build").arg(
+        Arg::option("targets")
+            .value_delimiter(',')
+            .default("linux,macos"),
+    ));
+    let m = app.try_parse_from(["build"]).unwrap();
+    assert_eq!(
+        m.leaf().values("targets").collect::<Vec<_>>(),
+        ["linux", "macos"]
+    );
+    assert_eq!(m.leaf().source("targets"), Some(ValueSource::Default));
+}
+
+#[test]
+fn test_a_delimited_positional_splits() {
+    let app = one(Command::new("tag").arg(Arg::positional("names").value_delimiter(',')));
+    let m = app.try_parse_from(["tag", "x,y", "z"]).unwrap();
+    assert_eq!(
+        m.leaf().values("names").collect::<Vec<_>>(),
+        ["x", "y", "z"]
+    );
+}
+
+#[test]
+fn test_help_states_the_delimiter() {
+    let app = one(Command::new("build").arg(Arg::option("features").value_delimiter(',')));
+    let help = plain(&app.command_help(["build"]).unwrap());
+    assert!(help.contains("[delimiter: ',']"), "{help}");
+}
+
+#[test]
 fn test_a_single_valued_option_is_last_wins() {
     let app = one(Command::new("build").arg(Arg::option("jobs")));
     let m = app

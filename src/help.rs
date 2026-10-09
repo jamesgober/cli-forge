@@ -399,6 +399,9 @@ fn arg_description(arg: &Arg) -> String {
         text.push(']');
     };
 
+    if let Some(delimiter) = arg.delimiter {
+        note("delimiter", &crate::shim::format!("'{delimiter}'"));
+    }
     if !arg.possible.is_empty() {
         note("possible", &arg.possible.join(", "));
     }

@@ -107,6 +107,7 @@ pub struct Arg {
     pub(crate) conflicts: Vec<String>,
     pub(crate) requires: Vec<String>,
     pub(crate) required_unless: Vec<String>,
+    pub(crate) delimiter: Option<char>,
 }
 
 impl Arg {
@@ -136,6 +137,7 @@ impl Arg {
             conflicts: Vec::new(),
             requires: Vec::new(),
             required_unless: Vec::new(),
+            delimiter: None,
         }
     }
 
@@ -414,6 +416,43 @@ impl Arg {
     #[must_use]
     pub fn multiple(mut self, multiple: bool) -> Arg {
         self.multiple = multiple;
+        self
+    }
+
+    /// Split each value on `delimiter`, so one occurrence can carry several.
+    ///
+    /// `--features a,b,c` yields `["a", "b", "c"]`, which is how most tools
+    /// accept a list without making the user repeat the flag. Each piece is
+    /// validated on its own, so [`possible_values`](Arg::possible_values) and
+    /// [`validate`](Arg::validate) see `a`, `b`, and `c` rather than `a,b,c`.
+    /// Repeating the flag still works and accumulates.
+    ///
+    /// Empty pieces are kept rather than dropped — `a,,b` is three values, the
+    /// middle one empty — because silently discarding input hides a typo that a
+    /// validator could otherwise catch. A default is split the same way.
+    ///
+    /// Implies [`multiple`](Arg::multiple): a list in one occurrence is several
+    /// values, so they are all kept. Read them with
+    /// [`Matches::values`](crate::Matches::values).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("cargo");
+    /// app.register(
+    ///     Command::new("build")
+    ///         .arg(Arg::option("features").value_delimiter(',')),
+    /// );
+    ///
+    /// let m = app.try_parse_from(["build", "--features", "serde,tokio", "--features", "log"]).unwrap();
+    /// assert_eq!(m.leaf().values("features").collect::<Vec<_>>(), ["serde", "tokio", "log"]);
+    /// ```
+    #[must_use]
+    pub fn value_delimiter(mut self, delimiter: char) -> Arg {
+        self.delimiter = Some(delimiter);
+        self.multiple = true;
         self
     }
 
@@ -720,6 +759,19 @@ impl Arg {
         self.multiple
     }
 
+    /// The character values are split on, if any.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Arg;
+    /// assert_eq!(Arg::option("features").value_delimiter(',').delimiter(), Some(','));
+    /// ```
+    #[must_use]
+    pub const fn delimiter(&self) -> Option<char> {
+        self.delimiter
+    }
+
     /// Whether this argument is hidden from generated help.
     ///
     /// # Examples
@@ -880,6 +932,7 @@ impl core::fmt::Debug for Arg {
         let _ = s.field("conflicts", &self.conflicts);
         let _ = s.field("requires", &self.requires);
         let _ = s.field("required_unless", &self.required_unless);
+        let _ = s.field("delimiter", &self.delimiter);
         s.finish()
     }
 }
