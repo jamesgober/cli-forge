@@ -40,8 +40,13 @@
 - [Read a secret from the environment](#read-a-secret-from-the-environment)
 - [Accept a file, or standard input](#accept-a-file-or-standard-input)
 - [Make two flags mutually exclusive](#make-two-flags-mutually-exclusive)
+- [Require exactly one of several flags](#require-exactly-one-of-several-flags)
+- [Let a flag be turned off](#let-a-flag-be-turned-off)
 - [Accept a list of files](#accept-a-list-of-files)
+- [Accept a comma-separated list](#accept-a-comma-separated-list)
 - [Group commands under one name](#group-commands-under-one-name)
+- [Group commands under headings in help](#group-commands-under-headings-in-help)
+- [Run plugins the way cargo does](#run-plugins-the-way-cargo-does)
 - [Put each command in its own module](#put-each-command-in-its-own-module)
 - [Return a specific exit code](#return-a-specific-exit-code)
 - [Override a config file only when asked](#override-a-config-file-only-when-asked)
@@ -492,6 +497,57 @@ assert_eq!(
 
 ---
 
+## Require exactly one of several flags
+
+```rust
+use cli_forge::{App, Arg, ArgGroup, Command};
+
+let mut app = App::new("export");
+app.register(
+    Command::new("dump")
+        .args([Arg::flag("json"), Arg::flag("yaml"), Arg::flag("toml")])
+        .group(ArgGroup::new("format").args(["json", "yaml", "toml"]).required(true))
+        .run(|m| {
+            let extension = match m.group("format") {
+                Some("json") => "json",
+                Some("yaml") => "yml",
+                _ => "toml",
+            };
+            let _ = extension;
+        }),
+);
+
+assert!(app.try_parse_from(["dump"]).is_err());                     // none
+assert!(app.try_parse_from(["dump", "--json", "--yaml"]).is_err()); // two
+assert!(app.try_parse_from(["dump", "--yaml"]).is_ok());            // one
+```
+
+Drop `.required(true)` for "at most one"; add `.multiple(true)` as well for "at
+least one". For exactly two flags, `conflicts_with` is enough.
+
+---
+
+## Let a flag be turned off
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("forge");
+app.register(Command::new("build").arg(Arg::flag("cache").negatable(true)).run(|m| {
+    // Some(true) for --cache, Some(false) for --no-cache, None if not mentioned.
+    let from_config = true;
+    let use_cache = m.explicit_flag("cache").unwrap_or(from_config);
+    let _ = use_cache;
+}));
+
+assert!(app.try_parse_from(["build", "--no-cache"]).is_ok());
+```
+
+The last spelling wins, so an alias can set `--no-cache` and the user can still
+type `--cache`. Help shows `--[no-]cache`.
+
+---
+
 ## Accept a list of files
 
 ```rust
@@ -510,6 +566,28 @@ let m = app.try_parse_from(["build", "-I", "a", "x.c", "y.c"]).unwrap();
 let build = m.leaf();
 assert_eq!(build.values("include").collect::<Vec<_>>(), ["a"]);
 assert_eq!(build.values("sources").collect::<Vec<_>>(), ["x.c", "y.c"]);
+```
+
+---
+
+## Accept a comma-separated list
+
+```rust
+use cli_forge::{App, Arg, Command};
+
+let mut app = App::new("cargo");
+app.register(Command::new("build").arg(
+    Arg::option("features")
+        .short('F')
+        .value_delimiter(',')
+        .possible_values(["serde", "tokio", "log"]),
+));
+
+let m = app.try_parse_from(["build", "--features", "serde,tokio", "-F", "log"]).unwrap();
+assert_eq!(m.leaf().values("features").collect::<Vec<_>>(), ["serde", "tokio", "log"]);
+
+// Each piece is validated on its own.
+assert!(app.try_parse_from(["build", "--features", "serde,toko"]).is_err());
 ```
 
 ---
@@ -537,6 +615,66 @@ app.register(
 assert!(app.try_parse_from(["remote"]).is_err());          // needs a subcommand
 assert!(app.try_run_from(["remote", "list"]).is_ok());
 ```
+
+---
+
+## Group commands under headings in help
+
+```rust
+use cli_forge::{App, Command};
+
+let mut app = App::new("forge");
+app.register(Command::new("build").about("compile"));
+app.register(Command::new("test").about("run the tests"));
+app.register(Command::new("publish").category("Release").about("upload a version"));
+app.register(Command::new("yank").category("Release").about("withdraw a version"));
+
+let help = cli_forge::text::strip(&app.help()).into_owned();
+assert!(help.contains("RELEASE:"));
+```
+
+```text
+COMMANDS:
+  build    compile
+  test     run the tests
+
+RELEASE:
+  publish  upload a version
+  yank     withdraw a version
+```
+
+`Arg::category` does the same for options.
+
+---
+
+## Run plugins the way cargo does
+
+```rust
+use std::process::ExitCode;
+
+use cli_forge::{App, Command};
+
+fn main() -> ExitCode {
+    let app = App::new("forge")
+        .external(|ext| {
+            // `forge watch src` runs `forge-watch src`.
+            let program = format!("forge-{}", ext.name());
+            match std::process::Command::new(&program).args(ext.args()).status() {
+                Ok(status) if status.success() => Ok(()),
+                Ok(status) => Err(format!("{program} exited with {status}")),
+                Err(_) => Err(match ext.suggestion() {
+                    Some(nearest) => format!("unknown command '{}'; did you mean '{nearest}'?", ext.name()),
+                    None => format!("unknown command '{}'", ext.name()),
+                }),
+            }
+        })
+        .command(Command::new("build").run(|_| cli_forge::ok("built")));
+
+    app.run()
+}
+```
+
+Registered commands never reach the hook, and flags are never handed off.
 
 ---
 

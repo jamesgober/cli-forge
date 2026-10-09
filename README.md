@@ -67,11 +67,14 @@ one system.
 - **Command tree** — a recursive `Command` tree registered into an `App` **from
   anywhere** (not just `main`), with aliases, `hidden`, `requires_auth`,
   `subcommand_required`, and `display_order`.
-- **A real argument model** — flags, counting flags (`-vvv`), options,
-  repeatable options, positionals, variadic positionals, app-level and
-  **global** arguments, environment fallbacks, defaults, `possible_values`,
-  arbitrary validators, conflicts, dependencies, and `required_unless`. Values
-  are checked at the edge, so reading them back cannot fail.
+- **A real argument model** — flags, counting flags (`-vvv`), negatable flags
+  (`--no-cache`), options, comma-separated lists, positionals, variadic
+  positionals, app-level and **global** arguments, environment fallbacks,
+  defaults, `possible_values`, arbitrary validators, conflicts, dependencies,
+  `required_unless`, and **argument groups** ("exactly one of these"). Values are
+  checked at the edge, so reading them back cannot fail.
+- **Plugins** — `App::external` hands unknown command names to a hook, the way
+  `cargo watch` runs a separate `cargo-watch`.
 - **Errors that answer "what now?"** — a `ParseError` carries the subject, what
   would have been valid, the nearest spelling to what was typed, and the usage
   line. Help and version exit `0`; a bad command line exits `2`.

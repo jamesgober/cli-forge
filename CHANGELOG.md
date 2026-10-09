@@ -23,7 +23,8 @@
 
 ## [2.1.0] - 2026-10-09
 
-Strictly additive. One new capability, and one performance fix.
+Strictly additive. Testable output, the rest of the argument model, plugins,
+help headings, and a parser fix.
 
 ### Added
 
@@ -48,44 +49,101 @@ to standard error and the success did not — which nothing else can observe.
   streams in the order the lines were written; `lines` drops the trailing
   newlines, which makes a failing assertion far more readable.
 - Per-thread, so tests that capture run in parallel with tests that print.
-  Nesting works: the inner capture takes over and the outer resumes.
-  Panic-safe: a panic inside the closure leaves the thread un-redirected.
-- Captures `out`, `err`, `write_to`, the themed printers, and the reports
-  `App::run` / `App::parse` print. Not `println!`, not a direct
-  `std::io::stdout` write, and not a child process.
+  Nesting works. Panic-safe: a panic inside the closure leaves the thread
+  un-redirected.
+- Sees `out`, `err`, `write_to`, the themed printers, and the reports `App::run` /
+  `App::parse` print. Not `println!`, not a direct `std::io::stdout` write, not a
+  child process — and `try_run_from` hands failures back rather than printing
+  them, so a capture around it sees handler output only.
+
+**Argument groups.** `conflicts_with` and `requires` describe pairs; an
+`ArgGroup` names a set and states one rule over it.
+
+```rust
+Command::new("dump")
+    .args([Arg::flag("json"), Arg::flag("yaml"), Arg::flag("toml")])
+    .group(ArgGroup::new("format").args(["json", "yaml", "toml"]).required(true))
+```
+
+At most one by default; `required` makes it exactly one; `required` + `multiple`
+is at least one. `Matches::group` names the member that answered, so dispatch is
+one `match`. A default answers a required group but never counts against the
+at-most-one rule, and a required group appears in the usage line
+(`<--json|--yaml|--toml>`).
+
+**Negatable flags.** `Arg::flag("cache").negatable(true)` accepts `--no-cache`.
+The last spelling wins. `Matches::explicit_flag` answers `Some(true)`,
+`Some(false)`, or `None` — the distinction `flag` collapses, and the one that
+matters when a config file has its own opinion. An explicit off never takes part
+in a conflict or satisfies a `requires`; on a negatable flag an environment value
+of `0`/`false`/`no`/`off` is an explicit off. Help shows `--[no-]cache`.
+
+**Lists in one value.** `Arg::value_delimiter(',')` makes `--features a,b` two
+values. Each piece is validated separately, empty pieces are kept rather than
+dropped, defaults and environment values split the same way, and help states
+`[delimiter: ',']`.
+
+**External subcommands.** `App::external(hook)` hands any command name the app
+does not define to `hook`, the way `cargo watch` runs a separate `cargo-watch`.
+The hook receives an `External`: the name, the untouched tokens after it, the
+app-level arguments parsed before it, and the nearest registered command for
+falling back to "did you mean". Registered commands and flags are never handed
+off; `try_parse_from` records the hand-off as `Matches::external` without running
+it. `App::suggest` exposes the same lookup.
+
+**Help categories.** `Command::category` and `Arg::category` put an item under its
+own heading instead of `COMMANDS:` / `OPTIONS:`. Sections appear in the order
+their first item does, so `display_order` still decides, and all sections share
+one column width.
+
+Introspection gains `Command::groups`, `Command::category_name`,
+`Arg::delimiter`, `Arg::category_name`, `Arg::is_negatable`, and the `ArgGroup`
+accessors.
 
 ### Changed
 
-While no capture is active anywhere in the process, the output path checks one
-relaxed atomic and proceeds exactly as before. Measured through a capture, `out`
-costs ~41 ns per line and a themed line ~210 ns; the real path locks standard
-output and flushes a `LineWriter` on the newline, so the added load is not
-measurable against it.
+**Clearer relationship errors.** They now say exactly what clashed, in the
+spelling the user typed:
+
+| Before | After |
+|---|---|
+| `'--json' cannot be used with the arguments it conflicts with` | `'--json' and '--yaml' cannot be used together` |
+| `the required argument 'format' was not provided` | `one of --json, --yaml, --toml is required` |
+| `'sign' requires another argument that was not provided` | `'--sign' requires '--key'` |
+
+The second was actively misleading — a group's name is not something anyone can
+type. `kind()` and `subject()` are unchanged, so code matching on them keeps
+working; error wording is outside the stability promise.
+
+While no capture is active, the output path checks one relaxed atomic and
+proceeds exactly as before. Through a capture, `out` costs ~41 ns per line and a
+themed line ~210 ns.
 
 ### Fixed
 
 **`Cli::inherited` deep-copied every global argument on every command level.**
 `parse_command` recurses, so a three-level invocation paid for three full copies
-of every argument marked `global`, each carrying six strings and three vectors.
-It now borrows, and the set is built once per parse.
-
-Two smaller allocations on the happy path went with it: every long and short flag
-formatted its own display form (`"--jobs"`) up front purely so a validation error
-could name it, and `bump_count` reached straight for `entry` — which needs an
-owned key — so `-vvv` allocated the argument name once per repeat.
+of every argument marked `global`. It now borrows, and the set is built once per
+parse. Two smaller happy-path allocations went with it: every flag formatted its
+own display form up front purely so a validation error could name it, and
+`bump_count` allocated the argument name once per repeat of `-vvv`.
 
 | Benchmark | 2.0.0 | 2.1.0 | |
 |---|---|---|---|
 | `parse_simple` | 1.34 µs | 1.22 µs | −8.9% |
 | `parse_rich` | 2.91 µs | 2.70 µs | −6.6% |
 
-The remaining gap against 1.x is hash-map traffic rather than allocation: roughly
-34 short-string hashes per parse, because `finalize` and the relationship check
-probe both the command's own slot and the global one for every declared
-argument. Closing it would mean ordered vectors and linear search, which is
-faster at the sizes a command actually has — but parsing happens once per
-process, three orders of magnitude below process startup, so it is not worth the
-churn.
+The remaining gap against 1.x is hash-map traffic rather than allocation. Parsing
+happens once per process, three orders of magnitude below process startup, so it
+is not worth the churn to close.
+
+### Testing
+
+`Arg::env` had only ever been tested with its variable unset, because the crate
+forbids `unsafe` and setting one is `unsafe` in the 2024 edition. `tests/env.rs`
+now covers precedence, empty-means-unset, flag truthiness, negation, delimiter
+splitting, group membership, and that a bad value from the environment is
+reported against `$NAME`.
 
 ---
 

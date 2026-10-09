@@ -62,8 +62,12 @@ If you only read one thing, read the [Guide](./GUIDE.md).
 - [Read a secret from the environment](./COMMANDS.md#defaults-and-environment-fallbacks)
 - [Accept `--verbose` anywhere](./COMMANDS.md#global-arguments)
 - [Make two flags mutually exclusive](./COMMANDS.md#relationships-between-arguments)
+- [Require exactly one of several](./COMMANDS.md#groups-of-arguments) &middot; [Recipe](./RECIPES.md#require-exactly-one-of-several-flags)
+- [Accept `--no-cache` as well as `--cache`](./COMMANDS.md#turning-a-flag-off)
+- [Accept a comma-separated list](./COMMANDS.md#lists-in-one-value)
+- [Support plugins, like `cargo watch`](./COMMANDS.md#plugins-external-subcommands) &middot; [Recipe](./RECIPES.md#run-plugins-the-way-cargo-does)
 - [Return a failure, and an exit code](./COMMANDS.md#failing-well)
-- [Customise the help page](./COMMANDS.md#help)
+- [Customise the help page](./COMMANDS.md#help) &middot; [add headings](./COMMANDS.md#sections)
 - [Test a CLI](./COMMANDS.md#testing) &middot; [Recipe](./RECIPES.md#test-a-command-without-running-it)
 - [Assert on what the program printed](./COMMANDS.md#testing-what-the-program-prints) &middot; [Recipe](./RECIPES.md#assert-on-what-the-program-printed)
 
