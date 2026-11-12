@@ -124,7 +124,7 @@
 //! - **`unicode`** *(default)* — correct display widths for CJK, emoji, and
 //!   combining marks.
 //! - **`termsize`** *(default)* — wrap help to the real terminal width.
-//! - **`auth`** — the authorization seam: [`App::auth`], [`AuthRequest`], and
+//! - **`auth`** — the authorization seam: `App::auth`, `AuthRequest`, and
 //!   enforcement of [`Command::requires_auth`].
 
 #![cfg_attr(not(feature = "std"), no_std)]

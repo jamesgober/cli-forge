@@ -7,11 +7,14 @@
 //! asks. This module is compiled only with the `auth` feature; without it,
 //! `requires_auth` is inert.
 //!
-//! The hook is `Fn(&`[`AuthRequest`]`) -> bool`. It is consulted before an
-//! auth-gated command's handler runs (returning `false` refuses the command with
-//! [`ParseError::Unauthorized`](crate::ParseError::Unauthorized)) and again when
-//! generating help (an unauthorized command is omitted from the listing). If no
-//! hook is set, auth-gated commands are never authorized — the seam fails closed.
+//! The hook is `Fn(&`[`AuthRequest`]`) -> bool`. It is consulted while parsing,
+//! for each auth-gated command on the invoked path, root first; returning
+//! `false` refuses the command with
+//! [`ErrorKind::Unauthorized`](crate::ErrorKind::Unauthorized) before its help,
+//! its arguments, or its handler are looked at. A gate therefore covers its
+//! whole subtree. It is consulted again when generating help and suggestions
+//! (an unauthorized command is omitted from both). If no hook is set, auth-gated
+//! commands are never authorized: the seam fails closed.
 //!
 //! Because it also runs during help generation, the hook should be pure and
 //! cheap: check already-loaded session state rather than doing I/O or printing.

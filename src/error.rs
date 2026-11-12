@@ -33,6 +33,7 @@ use std::fmt;
 
 use crate::shim::{String, Vec};
 use crate::terminal::Stream;
+use crate::text::sanitize;
 use crate::theme::{Level, Theme};
 
 /// The exit status a failed invocation produces, following the convention that
@@ -231,6 +232,16 @@ impl ParseError {
     ///
     /// Empty for [`HelpRequested`](ErrorKind::HelpRequested) and
     /// [`VersionRequested`](ErrorKind::VersionRequested), which are about nothing.
+    ///
+    /// Returned exactly as written. The rendered [`report`](ParseError::report)
+    /// shows any control characters in it in caret notation instead, so a
+    /// hostile argument cannot send escape sequences to the terminal.
+    ///
+    /// A value read from the environment, or given to a
+    /// [sensitive](crate::Arg::sensitive) argument, is never the subject: an
+    /// [`InvalidValue`](ErrorKind::InvalidValue) error about one names the
+    /// argument as written instead (`$FORGE_TOKEN`, `--token`), so the value
+    /// stays out of reports, logs, and `Debug` output.
     ///
     /// # Examples
     ///
@@ -450,9 +461,10 @@ impl ParseError {
 
         if let Some(detail) = &self.inner.detail {
             out.push_str("\n\n  ");
-            out.push_str(detail);
+            out.push_str(&sanitize(detail));
         }
         if let Some(suggestion) = &self.inner.suggestion {
+            let suggestion = sanitize(suggestion);
             let hint = crate::shim::format!("did you mean '{suggestion}'?");
             out.push_str("\n\n  ");
             out.push_str(&crate::shim::format!(
@@ -468,11 +480,16 @@ impl ParseError {
     }
 
     /// The one-line description of what went wrong, without decoration.
+    ///
+    /// The subject usually came from the command line, which is as untrusted as
+    /// any other input, so control characters in it are shown in caret notation
+    /// rather than reaching the terminal. [`subject`](ParseError::subject) still
+    /// returns it as written.
     fn message(&self) -> String {
         if let Some(headline) = &self.inner.headline {
-            return headline.clone();
+            return sanitize(headline).into_owned();
         }
-        let subject = &self.inner.subject;
+        let subject = sanitize(&self.inner.subject);
         match self.inner.kind {
             ErrorKind::UnknownFlag => crate::shim::format!("unknown flag '{subject}'"),
             ErrorKind::MissingValue => {
@@ -749,6 +766,30 @@ mod tests {
         );
         assert!(report.contains("did you mean '--release'?"));
         assert!(report.contains("USAGE: forge build [options]"));
+    }
+
+    #[test]
+    fn test_report_neutralises_control_characters_it_quotes() {
+        let hostile = "\x1b]52;c;eA==\x07\x1b[2J";
+        let error = ParseError::new(ErrorKind::UnknownCommand, hostile)
+            .with_detail("detail \x1b[31m")
+            .with_suggestion("near\x07")
+            .with_usage("USAGE: forge <command>");
+        for report in [
+            error.report(),
+            error.render(&Theme::plain(), crate::terminal::ColorLevel::TrueColor),
+            crate::shim::ToString::to_string(&error),
+        ] {
+            assert!(!report.contains('\x07'), "{report:?}");
+            assert!(!report.contains("\x1b]"), "{report:?}");
+            assert!(!report.contains("\x1b[2J"), "{report:?}");
+            assert!(!report.contains("\x1b[31m"), "{report:?}");
+        }
+        assert!(error.report().contains("^[]52;c;eA==^G^[[2J"));
+        // The accessor keeps what was typed, for code that needs it.
+        assert_eq!(error.subject(), hostile);
+        let headline = ParseError::new(ErrorKind::Conflict, "x").with_headline("a\x1b[2J");
+        assert_eq!(headline.report(), "error: a^[[2J");
     }
 
     #[test]

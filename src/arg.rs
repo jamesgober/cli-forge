@@ -103,6 +103,7 @@ pub struct Arg {
     pub(crate) possible: Vec<String>,
     pub(crate) validator: Option<Validator>,
     pub(crate) hidden: bool,
+    pub(crate) sensitive: bool,
     pub(crate) global: bool,
     pub(crate) conflicts: Vec<String>,
     pub(crate) requires: Vec<String>,
@@ -135,6 +136,7 @@ impl Arg {
             possible: Vec::new(),
             validator: None,
             hidden: false,
+            sensitive: false,
             global: false,
             conflicts: Vec::new(),
             requires: Vec::new(),
@@ -537,6 +539,12 @@ impl Arg {
     /// This is how a secret stays out of the process list: `--token` is visible
     /// to every user on the machine, and `FORGE_TOKEN` is not.
     ///
+    /// A value read from the variable is never quoted in a parse error: one that
+    /// fails [`possible_values`](Arg::possible_values) or a
+    /// [validator](Arg::validate) is reported as `invalid value in $FORGE_TOKEN`.
+    /// A validator's own message is printed as written, so it should describe
+    /// the problem without repeating the value.
+    ///
     /// # Examples
     ///
     /// ```
@@ -674,6 +682,62 @@ impl Arg {
     #[must_use]
     pub fn hide(mut self, hidden: bool) -> Arg {
         self.hidden = hidden;
+        self
+    }
+
+    /// The same as [`hide`](Arg::hide), under the name
+    /// [`Command::hidden`](crate::Command::hidden) uses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Arg;
+    /// assert!(Arg::flag("dump-ast").hidden(true).is_hidden());
+    /// ```
+    #[must_use]
+    pub fn hidden(self, hidden: bool) -> Arg {
+        self.hide(hidden)
+    }
+
+    /// Mark the argument's value as a secret: a password, a token, a key.
+    ///
+    /// A sensitive value is never quoted in a parse error, from the command line
+    /// or the environment: a value that fails
+    /// [`possible_values`](Arg::possible_values) or a [validator](Arg::validate)
+    /// is reported as `invalid value for '--token'`, with no "did you mean". It
+    /// is also shown as `<redacted>` in the `Debug` output of
+    /// [`Matches`](crate::Matches), so logging a parse result does not log the
+    /// secret. [`Matches::value`](crate::Matches::value) returns it as usual.
+    ///
+    /// A value written on the command line is still visible in the process list;
+    /// prefer [`env`](Arg::env) for secrets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::{App, Arg, Command};
+    ///
+    /// let mut app = App::new("forge");
+    /// app.register(Command::new("push").arg(
+    ///     Arg::option("token")
+    ///         .sensitive(true)
+    ///         .validate(|v: &str| {
+    ///             if v.starts_with("tok_") { Ok(()) } else { Err("must start with tok_".to_owned()) }
+    ///         }),
+    /// ));
+    ///
+    /// let err = app.try_parse_from(["push", "--token", "hunter2"]).unwrap_err();
+    /// assert!(!err.report().contains("hunter2"));
+    /// assert!(err.report().contains("invalid value for '--token'"));
+    ///
+    /// let m = app.try_parse_from(["push", "--token", "tok_hunter2"]).unwrap();
+    /// let (_, push) = m.subcommand().unwrap();
+    /// assert_eq!(push.value("token"), Some("tok_hunter2"));
+    /// assert!(!format!("{m:?}").contains("hunter2"));
+    /// ```
+    #[must_use]
+    pub fn sensitive(mut self, yes: bool) -> Arg {
+        self.sensitive = yes;
         self
     }
 
@@ -887,6 +951,20 @@ impl Arg {
         self.hidden
     }
 
+    /// Whether this argument's value is [sensitive](Arg::sensitive).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Arg;
+    /// assert!(Arg::option("token").sensitive(true).is_sensitive());
+    /// assert!(!Arg::option("name").is_sensitive());
+    /// ```
+    #[must_use]
+    pub const fn is_sensitive(&self) -> bool {
+        self.sensitive
+    }
+
     /// Whether this app-level argument is inherited by every subcommand.
     ///
     /// # Examples
@@ -966,21 +1044,51 @@ impl Arg {
     pub(crate) fn check(&self, value: &str, written: Written<'_>) -> Result<(), ParseError> {
         if !self.possible.is_empty() && !self.possible.iter().any(|allowed| allowed == value) {
             let allowed = self.possible.join(", ");
-            let mut error = ParseError::new(ErrorKind::InvalidValue, value).with_detail(
-                crate::shim::format!("'{}' accepts one of: {allowed}", written.display()),
-            );
-            if let Some(nearest) = did_you_mean(value, self.possible.iter().map(String::as_str)) {
-                error = error.with_suggestion(nearest);
+            let mut error = self
+                .invalid(value, written)
+                .with_detail(crate::shim::format!(
+                    "'{}' accepts one of: {allowed}",
+                    written.display()
+                ));
+            // A near miss would say how close a secret is to an allowed value.
+            if !self.sensitive {
+                if let Some(nearest) = did_you_mean(value, self.possible.iter().map(String::as_str))
+                {
+                    error = error.with_suggestion(nearest);
+                }
             }
             return Err(error);
         }
         if let Some(validator) = &self.validator {
             if let Err(complaint) = validator(value) {
-                return Err(ParseError::new(ErrorKind::InvalidValue, value)
+                return Err(self
+                    .invalid(value, written)
                     .with_detail(crate::shim::format!("{}: {complaint}", written.display())));
             }
         }
         Ok(())
+    }
+
+    /// The error for a rejected `value`.
+    ///
+    /// The value is quoted only when it came from the command line and the
+    /// argument is not sensitive. A value from the environment is where programs
+    /// keep tokens and passwords, so for that, and for a sensitive argument, the
+    /// error names the argument instead and the value goes nowhere.
+    fn invalid(&self, value: &str, written: Written<'_>) -> ParseError {
+        match written {
+            Written::Env(_) => {
+                let name = written.display();
+                ParseError::new(ErrorKind::InvalidValue, name.clone())
+                    .with_headline(crate::shim::format!("invalid value in {name}"))
+            }
+            _ if self.sensitive => {
+                let name = written.display();
+                ParseError::new(ErrorKind::InvalidValue, name.clone())
+                    .with_headline(crate::shim::format!("invalid value for '{name}'"))
+            }
+            _ => ParseError::new(ErrorKind::InvalidValue, value),
+        }
     }
 }
 
@@ -1030,6 +1138,7 @@ impl core::fmt::Debug for Arg {
         let _ = s.field("possible", &self.possible);
         let _ = s.field("has_validator", &self.validator.is_some());
         let _ = s.field("hidden", &self.hidden);
+        let _ = s.field("sensitive", &self.sensitive);
         let _ = s.field("global", &self.global);
         let _ = s.field("conflicts", &self.conflicts);
         let _ = s.field("requires", &self.requires);

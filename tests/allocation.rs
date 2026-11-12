@@ -12,15 +12,14 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// Allocations counted while `RECORDING` is armed on the current thread.
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
 thread_local! {
     /// Whether allocations on this thread are currently being counted. A `const`
     /// initializer keeps the first access from allocating and recursing.
     static RECORDING: Cell<bool> = const { Cell::new(false) };
+
+    /// Allocations counted while `RECORDING` is armed on this thread. Per
+    /// thread, so tests measuring in parallel cannot reset each other's count.
+    static ALLOC_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
 struct CountingAllocator;
@@ -30,7 +29,7 @@ struct CountingAllocator;
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if RECORDING.with(Cell::get) {
-            ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
+            ALLOC_COUNT.with(|count| count.set(count.get() + 1));
         }
         // SAFETY: `layout` is forwarded unchanged to the system allocator.
         unsafe { System.alloc(layout) }
@@ -49,11 +48,11 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 fn count_allocations(body: impl FnOnce()) -> usize {
     // Touch the thread-local before arming so its initialization is not counted.
     RECORDING.with(|r| r.set(false));
-    ALLOC_COUNT.store(0, Ordering::Relaxed);
+    ALLOC_COUNT.with(|count| count.set(0));
     RECORDING.with(|r| r.set(true));
     body();
     RECORDING.with(|r| r.set(false));
-    ALLOC_COUNT.load(Ordering::Relaxed)
+    ALLOC_COUNT.with(Cell::get)
 }
 
 #[test]
@@ -90,5 +89,31 @@ fn test_counter_detects_allocations() {
     assert!(
         allocations >= 1,
         "counting allocator failed to observe an allocation"
+    );
+}
+
+#[test]
+fn test_a_counting_flag_bundle_does_not_allocate_per_character() {
+    use cli_forge::{App, Arg, Command};
+
+    let app = App::new("forge").command(Command::new("b").arg(Arg::count("verbose").short('v')));
+    let parse = |repeats: usize| {
+        let argv = vec!["b".to_owned(), format!("-{}", "v".repeat(repeats))];
+        let mut count = 0;
+        let allocations = count_allocations(|| {
+            let m = app.try_parse_from(argv).expect("parses");
+            count = m.leaf().count("verbose");
+        });
+        assert_eq!(count, repeats);
+        allocations
+    };
+
+    let short = parse(4);
+    let long = parse(4_000);
+    // Collecting the bundle's characters grows one buffer a few times; that is
+    // all the extra length may cost.
+    assert!(
+        long < short + 32,
+        "-v x4 made {short} allocations, -v x4000 made {long}"
     );
 }

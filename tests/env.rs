@@ -125,7 +125,65 @@ fn environment_fallbacks_behave_as_documented() {
         "{:?}",
         error.detail()
     );
+    // The value itself is never quoted: the environment is where secrets live.
+    assert!(!error.report().contains("trace"), "{}", error.report());
+    assert!(!format!("{error:?}").contains("trace"));
+    assert_eq!(error.subject(), "$CLI_FORGE_TEST_LEVEL");
+    assert!(
+        error
+            .report()
+            .starts_with("error: invalid value in $CLI_FORGE_TEST_LEVEL"),
+        "{}",
+        error.report()
+    );
+    // The allowed values are not secret, so the hint still helps.
+    set("CLI_FORGE_TEST_LEVEL", "wran");
+    let error = app.try_parse_from(["push"]).unwrap_err();
+    assert_eq!(error.suggestion(), Some("warn"));
+    assert!(!error.report().contains("wran"));
     unset("CLI_FORGE_TEST_LEVEL");
+
+    // The same for a validator's refusal, which is the usual shape of a token
+    // check.
+    let checked = App::new("forge").command(
+        Command::new("push").arg(Arg::option("token").env("CLI_FORGE_TEST_SECRET").validate(
+            |v: &str| {
+                if v.starts_with("tok_") {
+                    Ok(())
+                } else {
+                    Err("must start with tok_".to_owned())
+                }
+            },
+        )),
+    );
+    set("CLI_FORGE_TEST_SECRET", "ghp_not_a_real_secret");
+    let error = checked.try_parse_from(["push"]).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidValue);
+    assert!(!error.report().contains("ghp_"), "{}", error.report());
+    assert!(!format!("{error:?}").contains("ghp_"));
+    assert!(error.report().contains("must start with tok_"));
+    // A value given on the command line is the user's own, and is quoted.
+    let error = checked
+        .try_parse_from(["push", "--token", "typed"])
+        .unwrap_err();
+    assert!(error.report().contains("invalid value 'typed'"));
+    unset("CLI_FORGE_TEST_SECRET");
+
+    // A sensitive argument keeps its value out of `Debug` for `Matches`, from
+    // either source.
+    let secret = App::new("forge").command(
+        Command::new("push").arg(
+            Arg::option("token")
+                .env("CLI_FORGE_TEST_SENSITIVE")
+                .sensitive(true),
+        ),
+    );
+    set("CLI_FORGE_TEST_SENSITIVE", "hunter2");
+    let m = secret.try_parse_from(["push"]).unwrap();
+    assert_eq!(m.leaf().value("token"), Some("hunter2"));
+    assert!(!format!("{m:?}").contains("hunter2"));
+    assert!(format!("{m:?}").contains("<redacted>"));
+    unset("CLI_FORGE_TEST_SENSITIVE");
 
     // A member supplied through its variable answers a group, and counts as
     // given for the at-most-one rule.

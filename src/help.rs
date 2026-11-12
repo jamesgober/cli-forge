@@ -355,14 +355,14 @@ fn listable(args: &[Arg]) -> Vec<&Arg> {
 /// Without the `auth` feature, `requires_auth` is inert: only `hidden` hides a
 /// command from help.
 #[cfg(not(feature = "auth"))]
-fn is_visible(command: &Command, _cli: &Cli, _parent_path: &[&str]) -> bool {
+pub(crate) fn is_visible(command: &Command, _cli: &Cli, _parent_path: &[&str]) -> bool {
     !command.hidden
 }
 
 /// With the `auth` feature, an auth-gated command is listed only when the hook
 /// authorizes it — so a user who cannot run a command is not told it exists.
 #[cfg(feature = "auth")]
-fn is_visible(command: &Command, cli: &Cli, parent_path: &[&str]) -> bool {
+pub(crate) fn is_visible(command: &Command, cli: &Cli, parent_path: &[&str]) -> bool {
     if command.hidden {
         return false;
     }

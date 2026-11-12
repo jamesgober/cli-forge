@@ -1485,6 +1485,185 @@ fn test_a_typo_of_a_built_in_carries_a_suggestion() {
     assert!(app.try_run_from(["xyzzy"]).unwrap().is_ok());
 }
 
+#[test]
+fn test_after_double_dash_flag_and_path_names_are_not_handed_off() {
+    static HOOKED: AtomicUsize = AtomicUsize::new(0);
+    let app = App::new("forge")
+        .external(|_| {
+            let _ = HOOKED.fetch_add(1, Ordering::SeqCst);
+        })
+        .command(Command::new("build"));
+
+    for (argv, kind) in [
+        (["--", "--exec=/bin/sh"], ErrorKind::UnknownFlag),
+        (["--", "-"], ErrorKind::UnknownFlag),
+        (["--", ""], ErrorKind::UnknownCommand),
+        (["--", "../../tmp/x"], ErrorKind::UnknownCommand),
+        (["--", "a\\b"], ErrorKind::UnknownCommand),
+        (["../../tmp/x", "y"], ErrorKind::UnknownCommand),
+    ] {
+        let error = app.try_run_from(argv).unwrap_err();
+        assert_eq!(error.kind(), kind, "{argv:?}");
+    }
+    assert_eq!(HOOKED.load(Ordering::SeqCst), 0);
+
+    // A plain name after `--` is still handed off.
+    assert!(app.try_run_from(["--", "watch"]).unwrap().is_ok());
+    assert_eq!(HOOKED.load(Ordering::SeqCst), 1);
+}
+
+// ---------------------------------------------------------------------------
+// What errors quote
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_control_characters_from_argv_never_reach_the_report() {
+    let app = App::new("forge")
+        .command(Command::new("build").arg(Arg::option("level").possible_values(["warn"])));
+    let hostile = "\x1b]52;c;eA==\x07\x1b[2J";
+
+    for argv in [
+        vec![hostile],
+        vec!["build", hostile],
+        vec!["build", "--level", hostile],
+    ] {
+        let error = app.try_parse_from(argv.clone()).unwrap_err();
+        for report in [error.report(), error.styled_report(), error.to_string()] {
+            assert!(!report.contains('\x07'), "{argv:?}: {report:?}");
+            assert!(!report.contains("\x1b]"), "{argv:?}: {report:?}");
+            assert!(!report.contains("\x1b[2J"), "{argv:?}: {report:?}");
+        }
+        assert!(error.report().contains("^[]52;c;eA==^G^[[2J"), "{argv:?}");
+        // The accessor still has exactly what was typed.
+        assert_eq!(error.subject(), hostile, "{argv:?}");
+    }
+
+    let error = app.try_parse_from(["build", "--lev\x1b[2Jel"]).unwrap_err();
+    assert!(!error.report().contains('\x1b'));
+}
+
+#[test]
+fn test_a_sensitive_value_is_never_quoted() {
+    let app = App::new("forge").command(
+        Command::new("login")
+            .arg(
+                Arg::option("password")
+                    .short('p')
+                    .sensitive(true)
+                    .validate(|v: &str| {
+                        if v.len() >= 12 {
+                            Ok(())
+                        } else {
+                            Err("too short".to_owned())
+                        }
+                    }),
+            )
+            .arg(
+                Arg::option("realm")
+                    .sensitive(true)
+                    .possible_values(["internal", "external"]),
+            )
+            .arg(
+                Arg::positional("key")
+                    .sensitive(true)
+                    .possible_values(["k1"]),
+            ),
+    );
+
+    for (argv, secret, named) in [
+        (
+            vec!["login", "--password", "hunter2"],
+            "hunter2",
+            "--password",
+        ),
+        (vec!["login", "--password=hunter2"], "hunter2", "--password"),
+        (vec!["login", "-phunter2"], "hunter2", "-p"),
+        (vec!["login", "--realm", "internl"], "internl", "--realm"),
+        (vec!["login", "k2secret"], "k2secret", "key"),
+    ] {
+        let error = app.try_parse_from(argv.clone()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidValue, "{argv:?}");
+        assert!(!error.report().contains(secret), "{}", error.report());
+        assert!(!format!("{error:?}").contains(secret), "{argv:?}");
+        assert_eq!(error.subject(), named, "{argv:?}");
+        assert!(
+            error
+                .report()
+                .starts_with(&format!("error: invalid value for '{named}'")),
+            "{}",
+            error.report()
+        );
+        // A near miss would say how close the secret is to an allowed value.
+        assert_eq!(error.suggestion(), None, "{argv:?}");
+    }
+
+    // A value that parses is returned as usual, and kept out of `Debug`.
+    let m = app
+        .try_parse_from(["login", "-p", "correct horse battery", "k1"])
+        .unwrap();
+    assert_eq!(m.leaf().value("password"), Some("correct horse battery"));
+    let dump = format!("{m:?}");
+    assert!(!dump.contains("correct horse"), "{dump}");
+    assert!(!dump.contains("k1"), "{dump}");
+    assert!(dump.contains("<redacted>"), "{dump}");
+}
+
+#[test]
+fn test_a_sensitive_global_is_redacted_at_every_level() {
+    let app = App::new("forge")
+        .arg(Arg::option("token").global(true).sensitive(true))
+        .arg(Arg::option("profile").global(true))
+        .command(Command::new("push"));
+    let m = app
+        .try_parse_from(["push", "--token", "s3cret", "--profile", "dev"])
+        .unwrap();
+    assert_eq!(m.leaf().value("token"), Some("s3cret"));
+    let dump = format!("{m:?}");
+    assert!(!dump.contains("s3cret"), "{dump}");
+    // Values that are not sensitive are still there to debug with.
+    assert!(dump.contains("dev"), "{dump}");
+}
+
+#[test]
+fn test_a_hidden_command_is_never_suggested_by_the_parser() {
+    let app = App::new("forge")
+        .command(Command::new("build"))
+        .command(Command::new("internal-reset").hidden(true))
+        .command(
+            Command::new("remote")
+                .subcommand(Command::new("add"))
+                .subcommand(Command::new("internal-prune").hidden(true))
+                .subcommand_required(true),
+        );
+
+    let error = app.try_parse_from(["internal-rese"]).unwrap_err();
+    assert_eq!(error.suggestion(), None);
+    assert!(!error.report().contains("internal-reset"));
+
+    let error = app.try_parse_from(["remote", "internal-prun"]).unwrap_err();
+    assert_eq!(error.suggestion(), None);
+    assert!(!error.report().contains("internal-prune"));
+
+    let error = app.try_parse_from(["remote"]).unwrap_err();
+    assert!(!error.report().contains("internal-prune"));
+
+    // Visible ones still are, and hidden ones still run.
+    assert_eq!(
+        app.try_parse_from(["buidl"]).unwrap_err().suggestion(),
+        Some("build")
+    );
+    assert!(app.try_parse_from(["internal-reset"]).is_ok());
+}
+
+#[test]
+fn test_hide_and_hidden_are_the_same_on_commands_and_arguments() {
+    assert!(Command::new("x").hide(true).is_hidden());
+    assert!(!Command::new("x").hide(true).hide(false).is_hidden());
+    assert!(Arg::flag("x").hidden(true).is_hidden());
+    let app = one(Command::new("run").arg(Arg::flag("dump").hidden(true)));
+    assert!(!plain(&app.command_help(["run"]).unwrap()).contains("dump"));
+}
+
 // ---------------------------------------------------------------------------
 // Introspection
 // ---------------------------------------------------------------------------
@@ -1643,6 +1822,188 @@ mod auth {
         assert!(help.contains("allowed"));
         assert!(!help.contains("refused"));
         assert!(!help.contains("invisible"));
+    }
+
+    /// An app whose `admin` group is gated and whose hook refuses everything.
+    fn gated_group(ran: &'static AtomicUsize) -> App {
+        App::new("forge").auth(|_| false).command(
+            Command::new("admin")
+                .requires_auth(true)
+                .about("ADMIN-ABOUT")
+                .subcommand(
+                    Command::new("wipe")
+                        .about("WIPE-ABOUT")
+                        .arg(Arg::flag("force"))
+                        .run(move |_| {
+                            let _ = ran.fetch_add(1, Ordering::SeqCst);
+                        }),
+                )
+                .subcommand(Command::new("list").subcommand(Command::new("all"))),
+        )
+    }
+
+    #[test]
+    fn test_a_gate_on_a_group_covers_its_subcommands() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let app = gated_group(&RAN);
+
+        for argv in [
+            vec!["admin"],
+            vec!["admin", "wipe"],
+            vec!["admin", "wipe", "--force"],
+            vec!["admin", "list", "all"],
+            // An error further down must not get the chance to describe it.
+            vec!["admin", "wipe", "--bogus"],
+            vec!["admin", "--bogus"],
+            vec!["admin", "wip"],
+        ] {
+            let error = app.try_run_from(argv.clone()).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Unauthorized, "{argv:?}");
+            assert_eq!(error.subject(), "admin", "{argv:?}");
+            assert!(!error.report().contains("wipe"), "{argv:?}");
+        }
+        assert_eq!(RAN.load(Ordering::SeqCst), 0, "the handler must not run");
+    }
+
+    #[test]
+    fn test_each_gated_level_is_checked_root_first() {
+        use std::sync::Mutex;
+        static ASKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+        let app = App::new("forge")
+            .auth(|req| {
+                ASKED.lock().unwrap().push(req.path().join(" "));
+                // The group is open to this user; one command inside is not.
+                req.path() != ["admin", "wipe"]
+            })
+            .command(
+                Command::new("admin")
+                    .requires_auth(true)
+                    .subcommand(Command::new("wipe").requires_auth(true).run(|_| {}))
+                    .subcommand(Command::new("list").run(|_| {})),
+            );
+
+        assert!(app.try_run_from(["admin", "list"]).unwrap().is_ok());
+        assert_eq!(*ASKED.lock().unwrap(), ["admin"]);
+        ASKED.lock().unwrap().clear();
+
+        let error = app.try_run_from(["admin", "wipe"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unauthorized);
+        assert_eq!(error.subject(), "wipe");
+        assert_eq!(*ASKED.lock().unwrap(), ["admin", "admin wipe"]);
+    }
+
+    #[test]
+    fn test_help_for_an_unauthorized_command_is_not_shown() {
+        static RAN: AtomicUsize = AtomicUsize::new(0);
+        let app = gated_group(&RAN)
+            .command(
+                Command::new("publish")
+                    .requires_auth(true)
+                    .about("PUBLISH-ABOUT"),
+            )
+            .command(
+                Command::new("internal")
+                    .hidden(true)
+                    .requires_auth(true)
+                    .about("INTERNAL-ABOUT"),
+            )
+            .command(Command::new("status").about("STATUS-ABOUT"));
+        let secrets = [
+            "ADMIN-ABOUT",
+            "WIPE-ABOUT",
+            "PUBLISH-ABOUT",
+            "INTERNAL-ABOUT",
+        ];
+
+        // `--help` on a command the user may not run is refused like running it.
+        for argv in [
+            vec!["publish", "--help"],
+            vec!["publish", "-h"],
+            vec!["internal", "--help"],
+            vec!["admin", "--help"],
+            vec!["admin", "wipe", "--help"],
+        ] {
+            let error = app.try_parse_from(argv.clone()).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Unauthorized, "{argv:?}");
+            for secret in secrets {
+                assert!(!error.report().contains(secret), "{argv:?}");
+            }
+        }
+
+        // `help <path>` shows the app help, as for a name that does not exist.
+        for argv in [
+            vec!["help", "publish"],
+            vec!["help", "internal"],
+            vec!["help", "admin"],
+            vec!["help", "admin", "wipe"],
+        ] {
+            let error = app.try_parse_from(argv.clone()).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::HelpRequested, "{argv:?}");
+            let text = plain(error.text().unwrap());
+            assert!(text.contains("STATUS-ABOUT"), "{argv:?}");
+            for secret in secrets {
+                assert!(!text.contains(secret), "{argv:?}: {text}");
+            }
+        }
+
+        for path in [
+            &["publish"][..],
+            &["internal"],
+            &["admin"],
+            &["admin", "wipe"],
+        ] {
+            assert_eq!(app.command_help(path), None, "{path:?}");
+        }
+        assert!(app.command_help(["status"]).is_some());
+    }
+
+    #[test]
+    fn test_help_for_an_authorized_command_is_still_shown() {
+        let app = App::new("forge").auth(|_| true).command(
+            Command::new("admin")
+                .requires_auth(true)
+                .subcommand(Command::new("wipe").about("WIPE-ABOUT")),
+        );
+        let error = app.try_parse_from(["admin", "wipe", "--help"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::HelpRequested);
+        assert!(error.report().contains("WIPE-ABOUT"));
+        let error = app.try_parse_from(["help", "admin", "wipe"]).unwrap_err();
+        assert!(error.report().contains("WIPE-ABOUT"));
+        assert!(
+            app.command_help(["admin", "wipe"])
+                .unwrap()
+                .contains("WIPE-ABOUT")
+        );
+    }
+
+    #[test]
+    fn test_an_unauthorized_command_is_never_suggested() {
+        let app = App::new("forge")
+            .auth(|_| false)
+            .command(Command::new("build"))
+            .command(Command::new("publish").requires_auth(true))
+            .command(
+                Command::new("remote")
+                    .subcommand(Command::new("add"))
+                    .subcommand(Command::new("purge").requires_auth(true))
+                    .subcommand_required(true),
+            );
+
+        let error = app.try_parse_from(["publsh"]).unwrap_err();
+        assert_eq!(error.suggestion(), None);
+        assert_eq!(app.suggest("publsh"), None);
+
+        let error = app.try_parse_from(["remote", "purg"]).unwrap_err();
+        assert_eq!(error.suggestion(), None);
+        assert!(!error.report().contains("purge"));
+
+        let error = app.try_parse_from(["remote"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::MissingSubcommand);
+        assert!(!error.report().contains("purge"), "{}", error.report());
+        assert!(error.report().contains("add"));
+
+        assert_eq!(app.suggest("buidl"), Some("build"));
     }
 
     #[test]

@@ -149,6 +149,36 @@ pub(crate) fn write_styled<W: Write>(
 /// The sequence that returns the terminal to its default appearance.
 const RESET: &str = "\x1b[0m";
 
+/// Write the opening OSC 8 hyperlink sequence for `url`.
+///
+/// The URL sits between `ESC ] 8 ; ;` and `BEL`, so a control character inside
+/// it would end the sequence early and let the rest of the URL act as new escape
+/// sequences. Every C0 control, `DEL`, and C1 control is written percent-encoded
+/// instead, which keeps the URL meaningful and the sequence intact. Shared by
+/// [`Style::link`] and the markup `<link=URL>` tag.
+pub(crate) fn write_link_open<W: Write>(w: &mut W, url: &str) -> fmt::Result {
+    w.write_str("\x1b]8;;")?;
+    let mut rest = url;
+    while let Some(at) = rest.find(is_link_control) {
+        w.write_str(&rest[..at])?;
+        let Some(ch) = rest[at..].chars().next() else {
+            break;
+        };
+        let mut buf = [0_u8; 4];
+        for byte in ch.encode_utf8(&mut buf).bytes() {
+            write!(w, "%{byte:02X}")?;
+        }
+        rest = &rest[at + ch.len_utf8()..];
+    }
+    w.write_str(rest)?;
+    w.write_char('\x07')
+}
+
+/// Whether `ch` must not appear raw inside an OSC 8 URL: C0, `DEL`, or C1.
+fn is_link_control(ch: char) -> bool {
+    matches!(ch, '\0'..='\x1f' | '\x7f'..='\u{9f}')
+}
+
 /// Write the opening escape sequence for `attrs`.
 fn open<W: Write>(w: &mut W, attrs: StyleAttrs, level: ColorLevel) -> fmt::Result {
     w.write_str("\x1b[")?;
@@ -588,6 +618,10 @@ impl Style {
     /// safe to add. It is the one way to put a long URL in output without making
     /// the user read it.
     ///
+    /// Control characters in `url` (C0, `DEL`, and C1) are written
+    /// percent-encoded, so a URL built from untrusted input cannot end the
+    /// sequence early or slip in escape sequences of its own.
+    ///
     /// # Examples
     ///
     /// ```
@@ -782,7 +816,7 @@ impl Style {
         level: ColorLevel,
     ) -> fmt::Result {
         if let Some(url) = &self.link {
-            write!(w, "\x1b]8;;{url}\x07")?;
+            write_link_open(w, url)?;
         }
 
         match self.pad {
@@ -1041,6 +1075,27 @@ mod tests {
         assert_eq!(rendered, "\x1b]8;;https://example.com\x07click\x1b]8;;\x07");
         assert_eq!(text::width(&rendered), 5);
         assert_eq!(text::strip(&rendered), "click");
+    }
+
+    #[test]
+    fn test_hyperlink_url_cannot_end_the_sequence_early() {
+        let s = Style::new().link("https://ok\x07\x1b]52;c;eA==\x07\u{9b}2J\x7f");
+        let rendered = s.paint_at("click", ColorLevel::Ansi16).to_string();
+        assert_eq!(
+            rendered,
+            "\x1b]8;;https://ok%07%1B]52;c;eA==%07%C2%9B2J%7F\x07click\x1b]8;;\x07"
+        );
+        // Exactly the two sequences a hyperlink needs, and nothing else.
+        assert_eq!(rendered.matches('\x1b').count(), 2);
+        assert_eq!(rendered.matches('\x07').count(), 2);
+        // A clean URL is written unchanged.
+        let plain = Style::new().link("https://example.com/a?b=c");
+        assert!(
+            plain
+                .paint_at("x", ColorLevel::Ansi16)
+                .to_string()
+                .starts_with("\x1b]8;;https://example.com/a?b=c\x07")
+        );
     }
 
     #[test]

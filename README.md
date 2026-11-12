@@ -35,7 +35,7 @@
 
 ## What's here
 
-`v2.1.0`. Two things set cli-forge apart from the alternatives: **output is
+`v2.2.0`. Two things set cli-forge apart from the alternatives: **output is
 themed and reusable** rather than restyled at every call site, and the **styling
 layer is a seam** sibling crates build on, so everything a program prints speaks
 one system.
@@ -86,7 +86,8 @@ one system.
   second hand-maintained description of it.
 - **Auth seam** *(feature `auth`)* — gate a command behind a consumer-supplied
   hook. cli-forge holds the seam; the login state lives in your code. Fails
-  closed, and hides unauthorized commands from help.
+  closed, covers a group's whole subtree, and hides unauthorized commands from
+  help and suggestions.
 - **`no_std`** — `--no-default-features` is a real build of the styling core on
   `alloc` alone.
 
@@ -100,7 +101,7 @@ Migrating from `1.x` is a handful of renames; see the
 
 ```toml
 [dependencies]
-cli-forge = "2.1"
+cli-forge = "2.2"
 ```
 
 The defaults are `std`, `color`, `unicode`, and `termsize`. For a build with no
@@ -109,7 +110,7 @@ approximate, and help wraps to `COLUMNS` or 80):
 
 ```toml
 [dependencies]
-cli-forge = { version = "2.1", default-features = false, features = ["std", "color"] }
+cli-forge = { version = "2.2", default-features = false, features = ["std", "color"] }
 ```
 
 <br>
@@ -463,7 +464,7 @@ with `cargo bench --bench bench`.
 
 ## Status
 
-`v2.1.0`. The public surface is guaranteed under Semantic Versioning: no
+`v2.2.0`. The public surface is guaranteed under Semantic Versioning: no
 breaking changes before `3.0`. See the SemVer promise in
 [`docs/API.md`](./docs/API.md#stability), the
 [migration table](./CHANGELOG.md#migrating-from-1x), and the

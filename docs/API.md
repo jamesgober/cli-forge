@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; the public surface and the SemVer promise.
+  <code>v2.2.0</code> &mdash; the public surface and the SemVer promise.
 </p>
 
 > **Signatures and examples live in the rustdoc**, at
@@ -158,12 +158,13 @@ approximated:
 
 ### Text measurement
 
-`text::width`, `strip`, `pad`, `truncate`, `wrap`, `sanitize`, `Align`.
+`text::width`, `strip`, `pad`, `truncate`, `wrap`, `sanitize`, `escape_markup`, `Align`.
 
 All measured in **display columns**, not bytes, skipping escape sequences. This is
 the seam every sibling crate that aligns anything depends on; a second
 implementation of it is a defect. `sanitize` neutralises the control characters
-that let untrusted text take over a terminal.
+that let untrusted text take over a terminal. `escape_markup` doubles every `<`
+so text put into a markup string prints as written.
 
 ### Terminal
 
@@ -187,14 +188,20 @@ first: `set_level`; `set_color_choice`; `CLICOLOR_FORCE` / `FORCE_COLOR`;
 
 `Command` — `new`, `alias`, `aliases`, `about`, `long_about`, `before_help`,
 `after_help`, `usage`, `arg`, `args`, `group`, `subcommand`,
-`subcommand_required`, `hidden`, `display_order`, `category`, `requires_auth`,
-`run`, `run_status`.
+`subcommand_required`, `hidden`, `hide` *(2.2, the same as `hidden`)*,
+`display_order`, `category`, `requires_auth`, `run`, `run_status`.
+
+`requires_auth` gates the command's whole subtree: every gated command on the
+invoked path is checked, root first, before anything else at that level, so a
+user who may not run a command gets neither its help nor a suggestion of it.
 
 `External` *(2.1)* — what the hook set with `App::external` receives for a
 command the app does not define: `name`, `args` (the untouched tokens after it),
 `matches` (the app-level arguments parsed before it), and `suggestion` (the
 nearest registered command, for a hook that finds no matching program). Marked
-`#[non_exhaustive]`. A flag is never handed off; only a bare name is.
+`#[non_exhaustive]`. A flag is never handed off; only a bare name is. From 2.2 a
+name after `--` that is empty, starts with `-`, or contains `/` or `\` is
+refused as well.
 
 **Entry points.** Four, because programs want different things:
 
@@ -212,7 +219,12 @@ nearest registered command, for a hook that finds no matching program). Marked
 `Arg` — constructors `flag`, `count`, `option`, `positional`; then `short`,
 `long`, `help`, `value_name`, `required`, `required_unless`, `conflicts_with`,
 `requires`, `multiple`, `value_delimiter`, `negatable`, `default`, `env`,
-`possible_values`, `validate`, `hide`, `global`, `category`.
+`possible_values`, `validate`, `hide`, `hidden` *(2.2, the same as `hide`)*,
+`sensitive` *(2.2)*, `global`, `category`.
+
+`sensitive(true)` *(2.2)* marks a secret: its value is never quoted in a parse
+error and shows as `<redacted>` in `Debug` for `Matches`. A value read from the
+environment is never quoted in a parse error either, sensitive or not.
 
 `ArgGroup` *(2.1)* — a rule over a set of arguments: `new`, `arg`, `args`,
 `required`, `multiple`, plus `name`, `members`, `is_required`, `is_multiple`.

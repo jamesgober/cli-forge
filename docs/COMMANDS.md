@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; defining commands, parsing input, validating values, reporting failure.
+  <code>v2.2.0</code> &mdash; defining commands, parsing input, validating values, reporting failure.
 </p>
 
 > If you have not read the [Guide](./GUIDE.md), start there. For a specific
@@ -1011,7 +1011,13 @@ use cli_forge::{App, Command, External};
 
 let app = App::new("forge")
     .external(|ext: &External<'_>| {
-        let program = format!("forge-{}", ext.name());
+        // The name becomes part of a program name: accept only what a plugin
+        // could be called.
+        let name = ext.name();
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(format!("unknown command '{name}'"));
+        }
+        let program = format!("forge-{name}");
         match std::process::Command::new(&program).args(ext.args()).status() {
             Ok(status) if status.success() => Ok(()),
             Ok(status) => Err(format!("{program} exited with {status}")),
@@ -1042,7 +1048,10 @@ The boundaries:
 
 - **Registered commands never reach the hook**, aliases included.
 - **A flag is never handed off.** `forge --bogus` is still an unknown-flag
-  error; only a bare name reaches the hook.
+  error; only a bare name reaches the hook. After `--` as well: a name that is
+  empty, starts with `-`, or contains `/` or `\` is an unknown command or flag.
+  Anything else the user typed can reach the hook, so check the name before
+  building a program name from it, as the example does.
 - **`forge help` and a bare `forge` keep their meaning.**
 - **Parsing still has no side effects.** `try_parse_from` records the hand-off as
   `Matches::external()` without calling the hook; `dispatch`, `run`, and
@@ -1306,8 +1315,13 @@ Three things to know:
 - **It fails closed.** An auth-gated command with no hook is never authorized.
   The alternative — a gate that silently opens when nobody wired it up — is not a
   gate.
+- **A gate covers its subtree.** Gating `admin` gates `admin wipe` and
+  everything else below it. Each gated command on the path is checked, root
+  first, and the first one the hook refuses stops the parse.
 - **An unauthorized command is absent from help**, so a user who cannot run
-  something is not told it exists.
+  something is not told it exists. The check comes first: `forge publish --help`
+  is refused as `Unauthorized`, `forge help publish` shows the app help, and
+  "did you mean" never suggests it.
 - **The hook also runs during help generation**, so keep it pure and cheap: check
   already-loaded session state, not I/O, and never print from it.
 

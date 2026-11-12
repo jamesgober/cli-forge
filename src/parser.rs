@@ -163,6 +163,9 @@ fn record(
     written: Written<'_>,
     source: ValueSource,
 ) -> Result<(), ParseError> {
+    if arg.sensitive {
+        let _ = matches.sensitive.insert(arg.name.clone());
+    }
     if let Some(delimiter) = arg.delimiter {
         // Every piece is checked before any is stored, so a bad piece leaves no
         // partial list behind.
@@ -277,8 +280,12 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
 
         // An unknown name goes to the external hook when there is one. Checked
         // after the help command, so `prog help` keeps its meaning, and only for
-        // a bare name — a flag never reaches here.
-        if cli.external && !cli.commands.iter().any(|c| c.matches_name(token)) {
+        // a bare name: a flag never reaches here, and neither does anything
+        // after `--` that looks like one or like a path.
+        if cli.external
+            && is_external_name(token)
+            && !cli.commands.iter().any(|c| c.matches_name(token))
+        {
             root.external = Some((token.clone(), tokens[i + 1..].to_vec()));
             break;
         }
@@ -327,6 +334,16 @@ pub(crate) fn parse_app(cli: &Cli, tokens: &[String]) -> Result<Matches, ParseEr
     Ok(root)
 }
 
+/// Whether `token` may be handed to the external hook as a command name.
+///
+/// Hooks typically turn the name into a program to run (`forge-NAME`) or pass it
+/// on as an argument, so a name that is empty, starts with `-`, or contains a
+/// path separator is refused here, as an unknown command or flag, rather than
+/// left for every hook to catch. Only `--` can get such a token this far.
+fn is_external_name(token: &str) -> bool {
+    !token.is_empty() && !token.starts_with('-') && !token.contains(['/', '\\'])
+}
+
 /// Find the command `token` names, or explain what was meant instead.
 fn resolve<'a>(cli: &'a Cli, token: &str) -> Result<&'a Command, ParseError> {
     if let Some(command) = cli.commands.iter().find(|c| c.matches_name(token)) {
@@ -338,13 +355,38 @@ fn resolve<'a>(cli: &'a Cli, token: &str) -> Result<&'a Command, ParseError> {
         ErrorKind::UnknownCommand
     };
     let mut error = ParseError::new(kind, token).with_usage(help::usage_app(cli));
+    // Only commands the listing would show are offered, so a near miss never
+    // names a hidden command or one the user is not authorized to run.
     if let Some(nearest) = did_you_mean(
         token,
-        cli.commands.iter().flat_map(Command::invocation_names),
+        cli.commands
+            .iter()
+            .filter(|c| help::is_visible(c, cli, &[]))
+            .flat_map(Command::invocation_names),
     ) {
         error = error.with_suggestion(nearest);
     }
     Err(error)
+}
+
+/// Whether the command reached by `path` may run: always, unless it is
+/// auth-gated and the hook does not authorize it. Fails closed without a hook.
+///
+/// Only `command` itself is checked; callers walk the path root first, so a
+/// gate on a group covers everything below it.
+#[cfg(feature = "auth")]
+pub(crate) fn authorized(cli: &Cli, path: &[&str], command: &Command) -> bool {
+    if !command.requires_auth {
+        return true;
+    }
+    let request = crate::auth::AuthRequest::new(path);
+    cli.authorizer.is_some_and(|hook| hook(&request))
+}
+
+/// Without the `auth` feature, `requires_auth` is inert.
+#[cfg(not(feature = "auth"))]
+pub(crate) fn authorized(_cli: &Cli, _path: &[&str], _command: &Command) -> bool {
+    true
 }
 
 /// Render help for the command path `rest` names, for `prog help remote add`.
@@ -360,6 +402,11 @@ fn help_for_path(cli: &Cli, rest: &[String]) -> ParseError {
         match next {
             Some(command) => {
                 path.push(command.name.as_str());
+                // A command the user may not run is treated like one that does
+                // not exist, the same as in the listing.
+                if !authorized(cli, &path, command) {
+                    return ParseError::request(ErrorKind::HelpRequested, help::render_app(cli));
+                }
                 current = Some(command);
             }
             // An unknown name in a help request is not worth an error: the app
@@ -390,6 +437,14 @@ pub(crate) fn parse_command(
     globals: &mut Matches,
     inherited: &[&Arg],
 ) -> Result<Matches, ParseError> {
+    // Checked before anything this command's tokens could trigger, help and
+    // errors included, so neither describes a command the user may not run.
+    // Every level calls this on the way down, root first, which is what makes a
+    // gate on a group cover its whole subtree.
+    if !authorized(cli, path, command) {
+        return Err(ParseError::new(ErrorKind::Unauthorized, &command.name));
+    }
+
     let usage = || help::usage_command(cli, path, command);
 
     let mut level = Matches::default();
@@ -477,12 +532,12 @@ pub(crate) fn parse_command(
             continue;
         }
 
-        return Err(surplus(command, token).with_usage(usage()));
+        return Err(surplus(cli, path, command, token).with_usage(usage()));
     }
 
     let subcommand_invoked = subcommand.is_some();
     if command.subcommand_required && !subcommand_invoked {
-        return Err(missing_subcommand(command).with_usage(usage()));
+        return Err(missing_subcommand(cli, path, command).with_usage(usage()));
     }
 
     {
@@ -502,11 +557,11 @@ pub(crate) fn parse_command(
 }
 
 /// Explain a command invoked bare that needs a subcommand.
-fn missing_subcommand(command: &Command) -> ParseError {
+fn missing_subcommand(cli: &Cli, path: &[&str], command: &Command) -> ParseError {
     let available: Vec<&str> = command
         .subcommands
         .iter()
-        .filter(|c| !c.hidden)
+        .filter(|c| help::is_visible(c, cli, path))
         .map(|c| c.name.as_str())
         .collect();
     ParseError::new(ErrorKind::MissingSubcommand, &command.name).with_detail(crate::shim::format!(
@@ -516,7 +571,10 @@ fn missing_subcommand(command: &Command) -> ParseError {
 }
 
 /// Explain a bare value that nothing can accept.
-fn surplus(command: &Command, token: &str) -> ParseError {
+///
+/// `path` leads to `command`; a suggestion names only subcommands the help
+/// listing would show.
+fn surplus(cli: &Cli, path: &[&str], command: &Command, token: &str) -> ParseError {
     if command.subcommands.is_empty() {
         return ParseError::new(ErrorKind::UnexpectedArgument, token);
     }
@@ -526,6 +584,7 @@ fn surplus(command: &Command, token: &str) -> ParseError {
         command
             .subcommands
             .iter()
+            .filter(|c| help::is_visible(c, cli, path))
             .flat_map(Command::invocation_names),
     ) {
         error = error.with_suggestion(nearest);
@@ -696,8 +755,9 @@ fn parse_short(
                 idx += 1;
             }
             ArgKind::Count => {
-                let name = arg.name.clone();
-                bump_count(sink.target(arg), &name);
+                // Borrowed, not cloned: `-vvv...` would otherwise allocate the
+                // name once per character.
+                bump_count(sink.target(arg), &arg.name);
                 idx += 1;
             }
             ArgKind::Option => {
