@@ -743,7 +743,7 @@ impl App {
     ///     app.run()
     /// }
     /// ```
-    #[must_use]
+    #[must_use = "the exit status is lost unless `main` returns it"]
     pub fn run(&self) -> ExitCode {
         let args = match process_args() {
             Ok(args) => args,
