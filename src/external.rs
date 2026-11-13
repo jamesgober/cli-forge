@@ -13,7 +13,13 @@
 //! use cli_forge::{App, Command, External};
 //!
 //! let mut app = App::new("forge").external(|ext: &External<'_>| {
-//!     let program = format!("forge-{}", ext.name());
+//!     // The name becomes part of a program name, so accept only what a plugin
+//!     // could be called.
+//!     let name = ext.name();
+//!     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+//!         return Err(format!("no such command: '{name}'"));
+//!     }
+//!     let program = format!("forge-{name}");
 //!     match std::process::Command::new(&program).args(ext.args()).status() {
 //!         Ok(status) if status.success() => Ok(()),
 //!         Ok(status) => Err(format!("{program} exited with {status}")),
@@ -33,7 +39,13 @@
 //! registered command for exactly that purpose.
 //!
 //! Flags are never handed off: a token beginning with `-` is still an app-level
-//! argument or an error. Only a bare name reaches the hook.
+//! argument or an error. Only a bare name reaches the hook. That holds after
+//! `--` too: a name that is empty, starts with `-`, or contains `/` or `\` is
+//! reported as an unknown command or flag instead of being handed off.
+//!
+//! Anything else the user typed can still reach the hook, so a hook that turns
+//! the name into a program to run should check it against the names its plugins
+//! can have, as the example above does.
 
 use crate::matches::Matches;
 
@@ -83,6 +95,9 @@ impl<'a> External<'a> {
     }
 
     /// The command name the user typed.
+    ///
+    /// Never empty, never starting with `-`, and never containing `/` or `\`.
+    /// Otherwise as typed, so check it before building a program name from it.
     #[must_use]
     pub fn name(&self) -> &str {
         self.name

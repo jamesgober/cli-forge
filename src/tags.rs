@@ -30,6 +30,10 @@
 //! | `</>` | close the innermost open tag, whatever it was |
 //! | `<<` | a literal `<` |
 //!
+//! To put text from elsewhere (a file name, a user's input) inside markup, pass
+//! it through [`text::escape_markup`](crate::text::escape_markup) first, so a
+//! `<` in it prints as written instead of opening a tag.
+//!
 //! `VALUE` is anything [`Color::parse`] accepts: a name (`red`, `bright_red`), a
 //! `#rrggbb` or `#rgb` hex string, an `r,g,b` triple, or a `0..=255` palette
 //! index.
@@ -50,7 +54,7 @@
 
 use crate::color::Color;
 use crate::shim::{String, Vec};
-use crate::style::{StyleAttrs, write_styled};
+use crate::style::{StyleAttrs, write_link_open, write_styled};
 use crate::terminal::{self, ColorLevel, Stream};
 
 /// The deepest nesting [`markup`] will track.
@@ -322,10 +326,10 @@ fn apply(
             // A hyperlink is an OSC sequence, not an SGR parameter, so it is
             // written straight through rather than folded into the attributes.
             // At `None` it is dropped with the rest of the styling.
+            // Control characters in the URL are percent-encoded, so it cannot
+            // end the sequence early. Writing to a `String` is infallible.
             if !level.is_none() {
-                out.push_str("\x1b]8;;");
-                out.push_str(&input[start..end]);
-                out.push('\x07');
+                let _ = write_link_open(out, &input[start..end]);
             }
         }
         Action::Close(kind) => {
@@ -529,6 +533,31 @@ mod tests {
         let rendered = render("<link=https://example.com>docs</link>", ColorLevel::Ansi16);
         assert_eq!(rendered, "\x1b]8;;https://example.com\x07docs\x1b]8;;\x07");
         assert_eq!(text::width(&rendered), 4);
+    }
+
+    #[test]
+    fn test_hyperlink_url_cannot_end_the_sequence_early() {
+        let rendered = render(
+            "<link=https://ok\x07\x1b]0;title\x07>x</link>",
+            ColorLevel::TrueColor,
+        );
+        assert_eq!(
+            rendered,
+            "\x1b]8;;https://ok%07%1B]0;title%07\x07x\x1b]8;;\x07"
+        );
+    }
+
+    #[test]
+    fn test_escaped_text_cannot_open_tags() {
+        let name = "<link=https://elsewhere.example>docs</link><b>";
+        let line = render(
+            &crate::shim::format!("<b>{}</b>", text::escape_markup(name)),
+            ColorLevel::Ansi16,
+        );
+        // Printed as written, all of it bold, and no hyperlink opened.
+        assert_eq!(text::strip(&line), name);
+        assert!(!line.contains("\x1b]8"), "{line:?}");
+        assert!(line.starts_with("\x1b[1m<"), "{line:?}");
     }
 
     #[test]

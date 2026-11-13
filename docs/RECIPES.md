@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; the answer, without the explanation.
+  <code>v2.2.0</code> &mdash; the answer, without the explanation.
 </p>
 
 > Every recipe is complete and compiles. For *why* any of it works, see

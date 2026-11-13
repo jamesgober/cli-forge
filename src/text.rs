@@ -14,7 +14,8 @@
 //! - **Shape.** [`pad`], [`truncate`], and [`wrap`] fit text to a column budget
 //!   without ever cutting an escape sequence in half.
 //! - **Neutralise.** [`strip`] removes styling; [`sanitize`] removes the control
-//!   characters that let untrusted text take over a terminal.
+//!   characters that let untrusted text take over a terminal; [`escape_markup`]
+//!   keeps text from elsewhere from opening [`markup`](crate::markup) tags.
 //!
 //! ## On width accuracy
 //!
@@ -253,6 +254,40 @@ pub fn sanitize(text: &str) -> Cow<'_, str> {
         }
     }
     Cow::Owned(out)
+}
+
+/// Escape text so that [`markup`](crate::markup) prints it as written.
+///
+/// Markup reads `<` as the start of a tag, so text from elsewhere (a file name,
+/// a branch name, a user's input) put into a markup string could open styles or
+/// hyperlinks of its own. Doubling every `<` turns it back into literal text;
+/// nothing else in markup needs escaping.
+///
+/// This is about markup only. It does not neutralise control characters: for
+/// untrusted text, use [`sanitize`] as well.
+///
+/// Borrows when there is nothing to escape.
+///
+/// # Examples
+///
+/// ```
+/// use cli_forge::{markup_at, text, ColorLevel};
+///
+/// let name = "<link=https://elsewhere.example>docs</link>";
+/// let line = markup_at(
+///     format!("<b>file:</b> {}", text::escape_markup(name)),
+///     ColorLevel::Ansi16,
+/// );
+/// // The name is printed as written; only the `<b>` tag took effect.
+/// assert_eq!(text::strip(&line), format!("file: {name}"));
+/// assert_eq!(text::escape_markup("plain"), "plain");
+/// ```
+#[must_use]
+pub fn escape_markup(text: &str) -> Cow<'_, str> {
+    if !text.contains('<') {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(text.replace('<', "<<"))
 }
 
 /// Whether `ch` is a control character that must not reach a terminal verbatim.

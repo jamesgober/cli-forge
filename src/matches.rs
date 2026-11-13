@@ -76,7 +76,7 @@ pub enum ValueSource {
 /// assert_eq!(build.value("jobs"), Some("8"));
 /// assert_eq!(build.get::<u32>("jobs"), Some(8));
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Matches {
     pub(crate) flags: HashSet<String>,
     /// Negatable flags explicitly turned off with `--no-NAME`.
@@ -86,6 +86,9 @@ pub struct Matches {
     pub(crate) sources: HashMap<String, ValueSource>,
     /// For each argument group, the member that answered it.
     pub(crate) groups: HashMap<String, String>,
+    /// The arguments marked [`sensitive`](crate::Arg::sensitive) that hold a
+    /// value here, so `Debug` can leave the value out.
+    pub(crate) sensitive: HashSet<String>,
     /// A command name the app does not define, and the tokens after it, when
     /// external subcommands are enabled.
     pub(crate) external: Option<(String, Vec<String>)>,
@@ -552,9 +555,56 @@ impl Matches {
         for (name, &source) in &globals.sources {
             let _ = self.sources.insert(name.clone(), source);
         }
+        for name in &globals.sensitive {
+            let _ = self.sensitive.insert(name.clone());
+        }
         if let Some((_, sub)) = self.subcommand.as_mut() {
             sub.merge_globals(globals);
         }
+    }
+}
+
+impl std::fmt::Debug for Matches {
+    /// Every field, except that the values of a
+    /// [sensitive](crate::Arg::sensitive) argument are shown as `<redacted>`, so
+    /// logging a parse result never logs a secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Matches")
+            .field("flags", &self.flags)
+            .field("negated", &self.negated)
+            .field("counts", &self.counts)
+            .field(
+                "values",
+                &Values {
+                    values: &self.values,
+                    sensitive: &self.sensitive,
+                },
+            )
+            .field("sources", &self.sources)
+            .field("groups", &self.groups)
+            .field("external", &self.external)
+            .field("subcommand", &self.subcommand)
+            .finish()
+    }
+}
+
+/// The values map as `Debug` shows it, with sensitive values replaced.
+struct Values<'a> {
+    values: &'a HashMap<String, Vec<String>>,
+    sensitive: &'a HashSet<String>,
+}
+
+impl std::fmt::Debug for Values<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut map = f.debug_map();
+        for (name, values) in self.values {
+            if self.sensitive.contains(name) {
+                let _ = map.entry(name, &"<redacted>");
+            } else {
+                let _ = map.entry(name, values);
+            }
+        }
+        map.finish()
     }
 }
 

@@ -390,7 +390,8 @@ impl App {
     ///
     /// let app = App::new("forge")
     ///     .external(|ext| {
-    ///         // In a real program: spawn format!("forge-{}", ext.name()).
+    ///         // In a real program: check the name, then spawn
+    ///         // format!("forge-{}", ext.name()).
     ///         if ext.name() == "watch" { Ok(()) } else { Err("no such command") }
     ///     })
     ///     .command(Command::new("build"));
@@ -414,7 +415,9 @@ impl App {
     /// suggest.
     ///
     /// The same suggestion an unknown-command error carries, for a program that
-    /// reports such mistakes itself.
+    /// reports such mistakes itself. Like the help listing, it never names a
+    /// hidden command, or (with the `auth` feature) one the auth hook does not
+    /// authorize.
     ///
     /// # Examples
     ///
@@ -427,11 +430,12 @@ impl App {
     /// ```
     #[must_use]
     pub fn suggest(&self, name: &str) -> Option<&str> {
+        let cli = self.cli();
         did_you_mean(
             name,
             self.commands
                 .iter()
-                .filter(|c| !c.hidden)
+                .filter(|c| crate::help::is_visible(c, &cli, &[]))
                 .flat_map(Command::invocation_names),
         )
     }
@@ -442,7 +446,14 @@ impl App {
     /// The hook receives an [`AuthRequest`](crate::AuthRequest) naming the command
     /// being authorized and returns whether to allow it. An auth-gated command
     /// runs only if the hook returns `true`; otherwise parsing yields
-    /// [`ErrorKind::Unauthorized`] and the handler does not run. Without a hook,
+    /// [`ErrorKind::Unauthorized`] and the handler does not run.
+    ///
+    /// A gate covers its subtree. Every gated command on the path to the one
+    /// invoked is checked, root first, and the first the hook refuses stops the
+    /// parse, so gating a group gates all of its subcommands. The check comes
+    /// before anything else at that level: `--help` for a command the user may
+    /// not run is refused the same way, and `prog help <command>` shows the app
+    /// help instead, as for a name that does not exist. Without a hook,
     /// auth-gated commands are never authorized — the seam fails closed, because
     /// the alternative is a gate that silently opens when nobody wired it up.
     ///
@@ -562,6 +573,9 @@ impl App {
     /// `path` is the chain of command names from the app down, so a nested
     /// command's page is reachable without re-deriving the tree.
     ///
+    /// With the `auth` feature, a command the auth hook does not authorize, or
+    /// one below such a command, is treated as absent and gives `None`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -588,6 +602,7 @@ impl App {
             .into_iter()
             .map(|name| name.as_ref().to_owned())
             .collect();
+        let cli = self.cli();
         let mut names: Vec<&str> = Vec::with_capacity(wanted.len());
         let mut current: Option<&Command> = None;
 
@@ -597,10 +612,13 @@ impl App {
                 Some(command) => command.find_subcommand(name),
             }?;
             names.push(next.name.as_str());
+            if !parser::authorized(&cli, &names, next) {
+                return None;
+            }
             current = Some(next);
         }
         let command = current?;
-        Some(crate::help::render_command(&self.cli(), &names, command))
+        Some(crate::help::render_command(&cli, &names, command))
     }
 
     /// Parse an explicit argument list, excluding the program name.
@@ -633,10 +651,9 @@ impl App {
     {
         self.apply_presentation();
         let tokens: Vec<String> = args.into_iter().map(Into::into).collect();
-        let matches = parser::parse_app(&self.cli(), &tokens)?;
-        #[cfg(feature = "auth")]
-        self.enforce_auth(&matches)?;
-        Ok(matches)
+        // Auth-gated commands are checked inside the parser, level by level, so
+        // a refusal comes before any help or error that would describe them.
+        parser::parse_app(&self.cli(), &tokens)
     }
 
     /// Parse an explicit argument list and run the selected command's handler.
@@ -726,7 +743,7 @@ impl App {
     ///     app.run()
     /// }
     /// ```
-    #[must_use]
+    #[must_use = "the exit status is lost unless `main` returns it"]
     pub fn run(&self) -> ExitCode {
         let args = match process_args() {
             Ok(args) => args,
@@ -820,38 +837,6 @@ impl App {
             #[cfg(feature = "auth")]
             authorizer: self.auth_hook.as_ref(),
         }
-    }
-
-    /// Refuse the resolved command if it is auth-gated and the hook does not
-    /// authorize it. Fails closed when no hook is set.
-    #[cfg(feature = "auth")]
-    fn enforce_auth(&self, matches: &Matches) -> Result<(), ParseError> {
-        let Some((path, leaf)) = self.resolve_path(matches) else {
-            return Ok(());
-        };
-        if !leaf.requires_auth {
-            return Ok(());
-        }
-        let request = crate::auth::AuthRequest::new(&path);
-        if self.auth_hook.as_ref().is_some_and(|hook| hook(&request)) {
-            return Ok(());
-        }
-        Err(ParseError::new(ErrorKind::Unauthorized, &leaf.name))
-    }
-
-    /// Walk the resolved subcommand chain, returning the command-name path and
-    /// the deepest command.
-    #[cfg(feature = "auth")]
-    fn resolve_path(&self, matches: &Matches) -> Option<(Vec<&str>, &Command)> {
-        let (name, mut sub) = matches.subcommand()?;
-        let mut command = self.commands.iter().find(|c| c.name == name)?;
-        let mut path = vec![command.name.as_str()];
-        while let Some((sub_name, next)) = sub.subcommand() {
-            command = command.find_subcommand(sub_name)?;
-            path.push(command.name.as_str());
-            sub = next;
-        }
-        Some((path, command))
     }
 }
 

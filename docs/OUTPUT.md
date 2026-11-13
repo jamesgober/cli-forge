@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; colours, themes, markers, columns, markup, and measuring text.
+  <code>v2.2.0</code> &mdash; colours, themes, markers, columns, markup, and measuring text.
 </p>
 
 > **This is the long one.** If you want a specific answer rather than an
@@ -726,6 +726,22 @@ error when the two streams differ, or a test that needs deterministic bytes.
 > **Markup is not a sanitiser.** An escape byte in the *input* is content and is
 > passed through. See [Untrusted text](#untrusted-text).
 
+Text from elsewhere put into a markup string can open tags of its own: a file
+named `<link=https://elsewhere.example>docs</link>` would become a link. Pass it
+through `text::escape_markup` first, which doubles every `<`:
+
+```rust
+use cli_forge::{markup, out, text};
+
+fn main() {
+    let name = "<b>not bold</b>";
+    out(markup(format!("<c=green>saved</c> {}", text::escape_markup(name))));
+}
+```
+
+A hyperlink's URL, from `<link=URL>` or `Style::link`, has any control
+characters percent-encoded, so it cannot end the link sequence early.
+
 ---
 
 ## Colour
@@ -1072,6 +1088,7 @@ fn main() {
 | `text::truncate(s, cols, ellipsis)` | Cut to a width, closing any open styling. |
 | `text::wrap(s, cols)` | Break into lines, at whitespace where possible. |
 | `text::sanitize(s)` | Neutralise control characters. |
+| `text::escape_markup(s)` | Make text safe to embed in markup. |
 
 ```rust
 use cli_forge::text::{self, Align};
@@ -1163,7 +1180,9 @@ fn main() {
 
 > **Where to apply it.** Anywhere text crosses into your program from outside.
 > The crate cannot do it for you, because it cannot tell which of your strings
-> you wrote and which you were handed.
+> you wrote and which you were handed. The one exception is the crate's own
+> parse errors: the command line is untrusted too, so a report sanitizes what it
+> quotes from it.
 
 ---
 
@@ -1210,6 +1229,9 @@ theme. Hold a `Theme` value and use `render` instead.
 **Using `hidden()` for secrets.** The bytes are still in the stream.
 
 **Printing an untrusted string directly.** Wrap it in `text::sanitize`.
+
+**Formatting an untrusted string into markup.** Wrap it in `text::escape_markup`
+(and `text::sanitize`, if it can hold control characters).
 
 **Hard-coding a hex colour for text the user reads.** It can vanish on a light
 background. Prefer the sixteen named colours, which follow the user's scheme.

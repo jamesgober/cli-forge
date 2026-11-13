@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; start here. Install it, write something that works, understand the shape.
+  <code>v2.2.0</code> &mdash; start here. Install it, write something that works, understand the shape.
 </p>
 
 > **No prior knowledge assumed.** Every example below is complete: copy it, run
@@ -31,7 +31,7 @@
 
 ```toml
 [dependencies]
-cli-forge = "2.1"
+cli-forge = "2.2"
 ```
 
 That is it. The defaults give you colour, correct text widths, and help that

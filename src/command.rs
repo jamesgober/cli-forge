@@ -383,6 +383,20 @@ impl Command {
         self
     }
 
+    /// The same as [`hidden`](Command::hidden), under the name
+    /// [`Arg::hide`](crate::Arg::hide) uses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cli_forge::Command;
+    /// assert!(Command::new("debug-dump").hide(true).is_hidden());
+    /// ```
+    #[must_use]
+    pub fn hide(self, yes: bool) -> Command {
+        self.hidden(yes)
+    }
+
     /// Set where this command sits in a help listing.
     ///
     /// Commands are listed by ascending order and then by registration order, so
@@ -441,10 +455,14 @@ impl Command {
     /// Mark the command as requiring authentication.
     ///
     /// With the `auth` feature enabled, the command runs — and appears in help —
-    /// only when the app's [`App::auth`](crate::App::auth) hook authorizes it;
+    /// only when the app's `App::auth` hook authorizes it;
     /// otherwise invoking it reports
     /// [`ErrorKind::Unauthorized`](crate::ErrorKind::Unauthorized). Without the
     /// `auth` feature the flag is inert and the command runs and shows normally.
+    ///
+    /// The gate covers the command's whole subtree: on a group, every
+    /// subcommand below it is refused too unless the hook authorizes the group,
+    /// and its help is not shown to a user who may not run it.
     ///
     /// # Examples
     ///

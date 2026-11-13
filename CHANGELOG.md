@@ -21,6 +21,90 @@
 
 ---
 
+## [2.2.0] - 2026-11-12
+
+Security fixes for the auth seam and for what parse errors print, plus a few
+small additions. No 2.1 program needs editing to upgrade.
+
+### Security
+
+**A gate on a command group now covers its subcommands.** With the `auth`
+feature, `requires_auth` was checked on the deepest command only, so
+`Command::new("admin").requires_auth(true)` refused `forge admin` but ran
+`forge admin wipe` without asking the hook. Every gated command on the invoked
+path is now checked, root first, and the first one the hook refuses stops the
+parse with `Unauthorized`. The hook sees each gated level's own path, so
+`["admin"]` and then `["admin", "wipe"]` if both are gated.
+
+**Help for a command the user may not run is no longer shown.** `--help` and
+`prog help <command>` rendered a gated command's page before the gate ran. The
+check now comes first at every level: `forge publish --help` is refused as
+`Unauthorized`, `forge help publish` shows the app help as it would for a name
+that does not exist, and `App::command_help` returns `None`. An error further
+down a gated subtree (an unknown flag, a missing value) is also reported as
+`Unauthorized` now, so it cannot describe the command either.
+
+**Values from the environment are never quoted in a parse error.** A value from
+`Arg::env` that failed `possible_values` or a validator was printed in full, as
+`invalid value 'ghp_...'`. The environment is where tokens and passwords live, so
+the report now reads `invalid value in $GITHUB_TOKEN`, and `subject()` is
+`$GITHUB_TOKEN` rather than the value, which also keeps it out of `Debug`.
+A value typed on the command line is still quoted, since the user just typed it.
+
+**Parse errors no longer pass control characters from the command line to the
+terminal.** An unknown command or a bad value containing escape sequences was
+printed raw by `App::run`. The report, the styled report, and `Display` now show
+control characters in the subject, detail, and suggestion in caret notation, the
+way `text::sanitize` does. `subject()` still returns exactly what was typed.
+
+**Hyperlink URLs cannot end the link sequence early.** `Style::link` and the
+markup `<link=URL>` tag wrote the URL raw between `ESC ] 8 ; ;` and `BEL`, so a
+`BEL` or `ESC` in a URL built from outside input ended the link and let the rest
+run as escape sequences. C0 controls, `DEL`, and C1 controls in the URL are now
+percent-encoded.
+
+**"Did you mean" no longer names hidden or unauthorized commands.** The
+parser's own suggestions, for an unknown command and for an unknown subcommand,
+and the list in a missing-subcommand error, considered every command. They now
+offer only what the help listing would show. `App::suggest` (and so
+`External::suggestion`) also leaves out commands the auth hook refuses.
+
+### Fixed
+
+**A name after `--` is no longer handed to the external hook if it looks like a
+flag or a path.** The docs said a token beginning with `-` never reaches the
+hook, but after `--` it did, and so did `../../tmp/x`. A name that is empty,
+starts with `-`, or contains `/` or `\` is now reported as an unknown command or
+flag instead. The plugin examples check the name before building a program name
+from it, which a hook should still do.
+
+**`-vvv` no longer allocates once per `v`.** 2.1 fixed this in the counter
+itself, but the short-flag parser still cloned the argument's name for each
+character. A test now counts the allocations.
+
+### Added
+
+- `Arg::sensitive(true)` and `Arg::is_sensitive()`. A sensitive value is never
+  quoted in a parse error from either source (`invalid value for '--token'`, and
+  no "did you mean"), and shows as `<redacted>` in `Debug` for `Matches`.
+- `text::escape_markup`, which doubles every `<` so text from elsewhere can be
+  put into a markup string without opening tags of its own. The markup docs now
+  point at it.
+- `Command::hide` and `Arg::hidden`, the same as `Command::hidden` and
+  `Arg::hide`, so either name works on both.
+
+### Changed
+
+- `ParseError::subject()` for an invalid value from the environment, or for a
+  sensitive argument, is the argument as written (`$NAME`, `--token`, `-t`)
+  rather than the value.
+- With the `auth` feature, an auth-gated command the hook refuses is reported as
+  `Unauthorized` before any other error at its level or below it.
+- `Matches` has a hand-written `Debug`. The output is the same as before except
+  for redacted sensitive values.
+
+---
+
 ## [2.1.0] - 2026-10-09
 
 Strictly additive. Testable output, the rest of the argument model, plugins,
@@ -593,7 +677,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jamesgober/cli-forge/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/jamesgober/cli-forge/compare/v2.1.0...v2.2.0
 [1.0.0]: https://github.com/jamesgober/cli-forge/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/jamesgober/cli-forge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jamesgober/cli-forge/compare/v0.4.0...v0.5.0

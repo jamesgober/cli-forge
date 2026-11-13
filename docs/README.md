@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <code>v2.1.0</code> &mdash; the documentation index.
+  <code>v2.2.0</code> &mdash; the documentation index.
 </p>
 
 <div align="center">
